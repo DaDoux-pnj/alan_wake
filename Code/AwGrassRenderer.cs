@@ -27,8 +27,8 @@ public sealed class AwGrassRenderer : Component, Component.ExecuteInEditor
 	/// <summary>Multiplier on the game's grass densities.</summary>
 	[Property] public float Density { get; set; } = 1;
 
-	/// <summary>Grid cells the game shades darker than this (under porches, in sheds) get no grass.</summary>
-	[Property] public float MinBrightness { get; set; } = 0.3f;
+	/// <summary>Grid cells the game shades darker than this (inside sheds) get no grass; the rest is shaded by it.</summary>
+	[Property] public float MinBrightness { get; set; } = 0.05f;
 
 	[Property] public bool CastShadows { get; set; }
 
@@ -173,7 +173,10 @@ sealed class GrassPoly
 	}
 }
 
-/// <summary>Grows grass for the polys near the rendering camera (a few per frame), forgets far ones, draws instanced.</summary>
+/// <summary>
+/// Grows grass for the polys near the rendering camera (a few per frame), forgets far ones, draws instanced.
+/// Each clump's scale carries the game's baked shading of its spot for shaders/aw_grass.shader: 1 + darkness / 1000.
+/// </summary>
 sealed class GrassSceneObject : SceneCustomObject
 {
 	const float InchesPerMetre = 39.3701f;
@@ -182,7 +185,6 @@ sealed class GrassSceneObject : SceneCustomObject
 	sealed class Grown
 	{
 		public List<Transform>[] Transforms;
-		public List<float>[] CutoffsSq;
 	}
 
 	readonly Model[] _clumps;
@@ -226,7 +228,7 @@ sealed class GrassSceneObject : SceneCustomObject
 
 	Grown Grow( GrassPoly poly )
 	{
-		var grown = new Grown { Transforms = new List<Transform>[_clumps.Length], CutoffsSq = new List<float>[_clumps.Length] };
+		var grown = new Grown { Transforms = new List<Transform>[_clumps.Length] };
 		var random = new Random( poly.Seed * 7919 + 101 );
 		float metresSq = InchesPerMetre * InchesPerMetre;
 
@@ -238,6 +240,7 @@ sealed class GrassSceneObject : SceneCustomObject
 			if ( code == 3 || poly.Brightness[k] < _minBrightness )
 				continue;
 
+			float scale = 1f + (255 - poly.Brightness[k]) / 255f * 0.001f;
 			var p00 = GrassPoly.Bilinear( poly.Corners, c / 16f, r / 16f );
 			var p10 = GrassPoly.Bilinear( poly.Corners, (c + 1) / 16f, r / 16f );
 			var p01 = GrassPoly.Bilinear( poly.Corners, c / 16f, (r + 1) / 16f );
@@ -260,13 +263,11 @@ sealed class GrassSceneObject : SceneCustomObject
 					float s = (c + random.NextSingle()) / 16f;
 					float t = (r + random.NextSingle()) / 16f;
 					float yaw = random.NextSingle() * 360f;
-					float cutoff = _maxDistance * (0.8f + 0.2f * random.NextSingle());
 
 					poly.Surface( s, t, _segments, out var position, out var normal );
 					var rotation = Rotation.FromToRotation( Vector3.Up, normal ) * Rotation.FromAxis( Vector3.Up, yaw );
 
-					(grown.Transforms[clump] ??= new List<Transform>()).Add( _world.ToWorld( new Transform( position, rotation ) ) );
-					(grown.CutoffsSq[clump] ??= new List<float>()).Add( cutoff * cutoff );
+					(grown.Transforms[clump] ??= new List<Transform>()).Add( _world.ToWorld( new Transform( position, rotation, scale ) ) );
 				}
 			}
 		}
@@ -323,10 +324,10 @@ sealed class GrassSceneObject : SceneCustomObject
 						if ( transforms is null )
 							continue;
 
-						var cutoffs = grown.CutoffsSq[k];
+						// The shader thins the grass out towards the distance; past it there's nothing left to draw.
 						for ( int n = 0; n < transforms.Count; n++ )
 						{
-							if ( (transforms[n].Position - camera).LengthSquared < cutoffs[n] )
+							if ( (transforms[n].Position - camera).LengthSquared < maxSq )
 								buffer[count++] = transforms[n];
 						}
 					}

@@ -23,6 +23,7 @@ sealed class AwGrassFile
 	{
 		public Vector3[] Positions;   // s&box space, inches
 		public Vector2[] Uvs;
+		public float[] Wind;          // 0 at the roots, 1 at the tips
 		public int[] Indices;         // s&box winding
 	}
 
@@ -60,12 +61,13 @@ sealed class AwGrassFile
 			if ( p + vertexCount * 16 + indexCount * 2 > b.Length )
 				throw new InvalidDataException( $"Grass clump {c} runs past the end of the file" );
 
-			var clump = new Clump { Positions = new Vector3[vertexCount], Uvs = new Vector2[vertexCount], Indices = new int[indexCount - indexCount % 3] };
+			var clump = new Clump { Positions = new Vector3[vertexCount], Uvs = new Vector2[vertexCount], Wind = new float[vertexCount], Indices = new int[indexCount - indexCount % 3] };
 			for ( int v = 0; v < vertexCount; v++ )
 			{
 				int o = p + v * 16;
 				clump.Positions[v] = AwSpace.Position( BitConverter.ToSingle( b, o ), BitConverter.ToSingle( b, o + 4 ), BitConverter.ToSingle( b, o + 8 ) );
 				clump.Uvs[v] = new Vector2( b[o + 12] / 255f, b[o + 13] / 255f );
+				clump.Wind[v] = b[o + 14] / 255f;
 			}
 			p += vertexCount * 16;
 

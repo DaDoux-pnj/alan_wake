@@ -119,6 +119,10 @@ public class AlanWakeMount : BaseGameMount
 	[ConVar( "aw_grass_density", ConVarFlags.Saved )]
 	public static float GrassDensity { get; set; } = 1;
 
+	/// <summary>Inches the grass tips sway in the wind (0 = still).</summary>
+	[ConVar( "aw_grass_wind", ConVarFlags.Saved )]
+	public static float GrassWind { get; set; } = 3;
+
 	internal const string GrassPath = "grass/grass.bingrs";
 
 	internal static string GrassClumpModelPath( int index ) => $"mount://alan_wake/grass/clump_{index:D2}.vmdl";

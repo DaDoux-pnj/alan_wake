@@ -29,6 +29,17 @@ struct AwTerrainVertex
 	[VertexLayout.TexCoord( 5 )] public Vector4 LayerUv2Blend;
 }
 
+/// <summary>Grass clump vertex for shaders/aw_grass.shader: colour red = wind weight.</summary>
+[StructLayout( LayoutKind.Sequential )]
+struct AwGrassVertex
+{
+	[VertexLayout.Position] public Vector3 Position;
+	[VertexLayout.Normal] public Vector3 Normal;
+	[VertexLayout.Tangent] public Vector4 Tangent;
+	[VertexLayout.TexCoord( 0 )] public Vector2 TexCoord;
+	[VertexLayout.Color] public Color Color;
+}
+
 /// <summary>
 /// Water vertex for shaders/aw_water.shader: the tangent points downstream, colour = (flow speed in world units/s,
 /// wave strength, foam, unused).
@@ -54,6 +65,7 @@ static class AwMaterials
 	const string GlassShader = "shaders/glass.shader";
 	const string TerrainShader = "shaders/aw_terrain.shader";
 	const string WaterShader = "shaders/aw_water.shader";
+	const string GrassShader = "shaders/aw_grass.shader";
 
 	static readonly object Lock = new();
 	static readonly Dictionary<string, Material> Materials = new( StringComparer.OrdinalIgnoreCase );
@@ -426,26 +438,36 @@ static class AwMaterials
 		return material;
 	}
 
-	/// <summary>Alpha-tested, two sided material for the game's grass clumps (one atlas for all of them).</summary>
+	/// <summary>
+	/// The game's grass clumps (one atlas for all of them) on shaders/aw_grass.shader: alpha tested, two sided, the tips
+	/// swaying in the wind (aw_grass_wind), thinning out towards aw_grass_distance.
+	/// </summary>
 	public static Material ForGrass( AlanWakeMount host, string atlasPath )
 	{
-		var key = $"grass|{atlasPath}";
+		float distance = MathF.Max( 1f, AlanWakeMount.GrassDistance ) * AwSpace.Scale;
+		float wind = Math.Clamp( AlanWakeMount.GrassWind, 0f, 20f );
+		var key = $"grass|{atlasPath}|{distance:0}|{wind:0.00}";
 		lock ( Lock )
 		{
 			if ( Materials.TryGetValue( key, out var cached ) )
 				return cached;
 		}
 
-		var material = Material.Create( $"alan_wake/materials/m{System.Threading.Interlocked.Increment( ref _counter )}", ObjectShader, false );
+		var material = Material.Create( $"alan_wake/materials/m{System.Threading.Interlocked.Increment( ref _counter )}", GrassShader, false );
 		material.Set( "g_tColor", Color( host, atlasPath ) ?? Texture.White );
-		material.Set( "g_tNormal", FlatNormal( 240 ) );
-		material.Set( "g_tAmbientOcclusion", Texture.White );
-		material.Set( "g_flMetalness", 0f );
-		material.Set( "g_flRoughnessScaleFactor", 1.0f );
-		material.Set( "g_vColorTint", global::Color.White );
+		material.Set( "g_tNormal", FlatNormal( 255 ) );
+		material.Set( "g_tRma", Solid( 230, 0, 255, 0 ) ); // rough, no metalness, no occlusion
+		material.Set( "g_flTintColor", Vector3.One );
 		material.SetFeature( "F_ALPHA_TEST", 1 );
 		material.Set( "g_flAlphaTestReference", 0.5f );
 		material.SetFeature( "F_RENDER_BACKFACES", 1 );
+
+		material.Set( "g_flGrassWindStrength", wind );
+		material.Set( "g_flGrassWindSpeed", 1.2f );
+		material.Set( "g_flGrassWindWaveScale", 0.004f );
+		material.Set( "g_vGrassWindDirection", new Vector2( 0.8f, 0.6f ) );
+		material.Set( "g_flGrassFadeStart", distance * 0.75f );
+		material.Set( "g_flGrassFadeEnd", distance );
 
 		lock ( Lock ) Materials[key] = material;
 		return material;

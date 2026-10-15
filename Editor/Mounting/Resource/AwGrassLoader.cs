@@ -4,7 +4,10 @@ using System.IO;
 
 namespace Sandbox.Mounting;
 
-/// <summary>One of the game's grass clumps (grass/clump_NN), standing on +Z, lit with an upward normal.</summary>
+/// <summary>
+/// One of the game's grass clumps (grass/clump_NN), standing on +Z, lit with an upward normal; vertex colour red is
+/// the game's wind weight (0 at the roots, 1 at the tips) for shaders/aw_grass.shader.
+/// </summary>
 sealed class AwGrassClumpLoader( int index ) : ResourceLoader<AlanWakeMount>
 {
 	protected override object Load()
@@ -16,12 +19,32 @@ sealed class AwGrassClumpLoader( int index ) : ResourceLoader<AlanWakeMount>
 				return null;
 
 			var clump = grass.Clumps[index];
-			var normals = new Vector3[clump.Positions.Length];
-			Array.Fill( normals, Vector3.Up );
-			var sub = new AwMeshFile.SubMesh { Positions = clump.Positions, Normals = normals, Uv0 = clump.Uvs, Indices = clump.Indices };
+			var vertices = new List<AwGrassVertex>( clump.Positions.Length );
+			var min = new Vector3( float.MaxValue );
+			var max = new Vector3( float.MinValue );
+			for ( int i = 0; i < clump.Positions.Length; i++ )
+			{
+				var p = clump.Positions[i];
+				min = Vector3.Min( min, p );
+				max = Vector3.Max( max, p );
+				float wind = clump.Wind is not null && i < clump.Wind.Length ? clump.Wind[i] : 0f;
+				vertices.Add( new AwGrassVertex
+				{
+					Position = p,
+					Normal = Vector3.Up,
+					Tangent = new Vector4( 1, 0, 0, 1 ),
+					TexCoord = clump.Uvs[i],
+					Color = new Color( wind, 0, 0, 1 ),
+				} );
+			}
+
+			var mesh = new Mesh( AwMaterials.ForGrass( Host, grass.Atlas ), MeshPrimitiveType.Triangles );
+			mesh.CreateVertexBuffer( vertices.Count, vertices );
+			mesh.CreateIndexBuffer( clump.Indices.Length, new List<int>( clump.Indices ) );
+			mesh.Bounds = new BBox( min, max );
 
 			var builder = Model.Builder.WithName( Path );
-			builder.AddMesh( AwModelLoader.BuildMesh( AwMaterials.ForGrass( Host, grass.Atlas ), sub, out _ ) );
+			builder.AddMesh( mesh );
 			return builder.Create();
 		}
 		catch ( Exception ex )
