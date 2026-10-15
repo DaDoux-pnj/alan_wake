@@ -45,10 +45,6 @@ public class AlanWakeMount : BaseGameMount
 	[ConVar( "aw_terrain_lod_distance", ConVarFlags.Saved )]
 	public static float TerrainLodDistance { get; set; } = 6000;
 
-	/// <summary>Which 5-bit fields of the blend map are the two layer thresholds (0: R,B  1: B,R).</summary>
-	[ConVar( "aw_terrain_blend_mode", ConVarFlags.Saved )]
-	public static int TerrainBlendMode { get; set; } = 0;
-
 	[ConVar( "aw_terrain_brightness", ConVarFlags.Saved )]
 	public static float TerrainBrightness { get; set; } = 1.0f;
 

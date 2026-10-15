@@ -14,23 +14,31 @@ namespace Sandbox.Mounting;
 ///   u32 polyCount, polys (196 bytes){ s32 vertex[4] (-1 = triangle), u8 corners, u8[3],
 ///       corner[4]{ u16 uv0[2], u16 uv1[2], u16 uv2[2], u16 atlas[2] }, tangents s16[4][9], f32 sphere[4],
 ///       u16 neighbour[4], u8 neighbourEdge[4], u16 material, u16 flags, u32, u8[4] },
-///   u32 count, blend maps{ u32 index, u32 dim (8), u16[dim*dim] }, ...
+///   normal maps, blend maps (8 x 8, see below), ...
 ///
-/// High detail (HD cell, flag 1) adds per poly displacement and finer blend maps for the same polys:
+/// High detail (HD cell, flag 1) adds per poly displacement and finer maps for the same polys:
 ///   u32 25, u8 1, u32 polyCount, grids{ u32 index, s16[16*16], s32 min, max, mean },
-///   u32 count, count x 80 bytes, u32 count, blend maps{ u32 index, u32 dim (16), u16[dim*dim] }, ...
+///   u32 count, count x 80 bytes, normal maps, blend maps (16 x 16).
+///
+/// A map set is u32 count, count x { u32 polyIndex, u32 dim, u16[dim*dim] } (row = t, column = s), with
+/// X1R5G5B5 samples: R = bits 10-14, G = bits 5-9, B = bits 0-4.
+///   normal maps: world space normal (x, y up, z) = rgb * 2 - 1.
+///   blend maps:  R and G are the layer 1 / layer 2 thresholds and B a baked brightness (shadowing under
+///                houses etc.), consumed like the game's "TerrainMeshMaker" bake:
+///                colour = lerp( C2, lerp( C1, C0, t1 ), t2 ) * B, t1 = sat( (C1.a - R) * 32 ), t2 = sat( (C2.a - G) * 32 ).
+/// High detail maps put their first and last samples on the poly edges (neighbours share edge samples);
+/// low detail maps sample texel centres.
 ///
 /// Displaced point at grid (r, c): bilinear(corners, s = c/15, t = r/15) + bilinear(corner normals) * height / 2048.
 /// Quad corner order on the grid: v0 = (0,0), v1 = (0,15), v2 = (15,15), v3 = (15,0).
 /// Triangles use v0 = (0,0), v1 = (15,0), v2 = (15,15) with the (0,15) corner collapsed onto v0.
-///
-/// Blend samples are X1R5G5B5: two height-blend thresholds and a brightness term, consumed by the
-/// "TerrainMeshMaker" logic: colour = lerp( C2, lerp( C1, C0, t1 ), t2 ) * brightness,
-/// t1 = sat( (C1.a - x) * 32 ), t2 = sat( (C2.a - y) * 32 ).
-/// Layer UVs are u16 per corner (wrapping), scaled by 1/1024.
+/// Layer UVs are u16 per corner, <see cref="LayerUvPeriod"/> units per texture repeat (wrapping).
 /// </summary>
 sealed class AwTerrainFile
 {
+	/// <summary>Layer UV units per texture repeat. Neighbouring polys only ever differ by whole multiples of it.</summary>
+	public const int LayerUvPeriod = 2048;
+
 	public struct Poly
 	{
 		public int V0, V1, V2, V3;     // V3 = -1 for triangles
@@ -39,18 +47,49 @@ sealed class AwTerrainFile
 		public int Material;
 	}
 
+	/// <summary>One per poly map set.</summary>
+	public sealed class PolyMaps
+	{
+		public int Dim;
+		public ushort[][] Maps;
+		public bool CornerAligned;
+
+		/// <summary>Sample position in texels (texel k is centred on k + 0.5) for a poly coordinate in [0, 1].</summary>
+		public float Coord( float s ) => CornerAligned ? s * (Dim - 1) + 0.5f : Math.Clamp( s * Dim, 0.5f, Dim - 0.5f );
+
+		/// <summary>Bilinearly filtered normal map sample, Alan Wake space.</summary>
+		public Vector3 SampleNormal( int poly, float s, float t )
+		{
+			var map = poly < Maps.Length ? Maps[poly] : null;
+			if ( map is null || map.Length < Dim * Dim )
+				return Vector3.Zero;
+
+			float x = Coord( s ) - 0.5f, y = Coord( t ) - 0.5f;
+			int x0 = Math.Clamp( (int)MathF.Floor( x ), 0, Dim - 1 ), y0 = Math.Clamp( (int)MathF.Floor( y ), 0, Dim - 1 );
+			int x1 = Math.Min( x0 + 1, Dim - 1 ), y1 = Math.Min( y0 + 1, Dim - 1 );
+			float fx = Math.Clamp( x - x0, 0, 1 ), fy = Math.Clamp( y - y0, 0, 1 );
+
+			var top = Vector3.Lerp( DecodeNormal( map[y0 * Dim + x0] ), DecodeNormal( map[y0 * Dim + x1] ), fx );
+			var bottom = Vector3.Lerp( DecodeNormal( map[y1 * Dim + x0] ), DecodeNormal( map[y1 * Dim + x1] ), fx );
+			return Vector3.Lerp( top, bottom, fy ).Normal;
+		}
+
+		static Vector3 DecodeNormal( ushort v )
+			=> new( ((v >> 10) & 31) / 15.5f - 1f, ((v >> 5) & 31) / 15.5f - 1f, (v & 31) / 15.5f - 1f );
+	}
+
 	public string[] Textures = Array.Empty<string>();
 	public ushort[][] Materials = Array.Empty<ushort[]>();
 	public Vector3[] Positions = Array.Empty<Vector3>();   // metres, Alan Wake space
 	public Vector3[] Normals = Array.Empty<Vector3>();     // Alan Wake space
 	public Poly[] Polys = Array.Empty<Poly>();
-	public int BlendDim;
-	public ushort[][] Blend = Array.Empty<ushort[]>();     // per poly, BlendDim x BlendDim
+	public PolyMaps NormalMaps;
+	public PolyMaps Blend;
 
 	// High detail data (null when only LD exists)
 	public short[][] Heights;
-	public int HdBlendDim;
-	public ushort[][] HdBlend;
+	public PolyMaps HdNormalMaps;
+	public PolyMaps HdBlend;
 
 	public static AwTerrainFile ReadLowDetail( byte[] b )
 	{
@@ -110,7 +149,17 @@ sealed class AwTerrainFile
 		}
 		p += polyCount * 196;
 
-		(t.BlendDim, t.Blend) = ReadMaps( b, ref p, polyCount );
+		try
+		{
+			t.NormalMaps = ReadMaps( b, ref p, polyCount, cornerAligned: false );
+			t.Blend = ReadMaps( b, ref p, polyCount, cornerAligned: false );
+		}
+		catch ( Exception )
+		{
+			// keep the geometry: the loader falls back to computed normals and the base layer
+			t.NormalMaps = null;
+			t.Blend = null;
+		}
 		return t;
 	}
 
@@ -139,19 +188,22 @@ sealed class AwTerrainFile
 
 		try
 		{
-			(HdBlendDim, HdBlend) = ReadMaps( b, ref p, count );
+			HdNormalMaps = ReadMaps( b, ref p, count, cornerAligned: true );
+			HdBlend = ReadMaps( b, ref p, count, cornerAligned: true );
 		}
 		catch ( Exception )
 		{
-			HdBlend = null; // fall back to the LD blend maps
+			// fall back to the LD maps
+			HdNormalMaps = null;
+			HdBlend = null;
 		}
 	}
 
-	static (int Dim, ushort[][] Maps) ReadMaps( byte[] b, ref int p, int expected )
+	static PolyMaps ReadMaps( byte[] b, ref int p, int expected, bool cornerAligned )
 	{
-		if ( p + 4 > b.Length ) return (0, Array.Empty<ushort[]>());
+		if ( p + 4 > b.Length ) return null;
 		int count = (int)U32( b, ref p );
-		if ( count != expected ) throw new InvalidDataException( $"Expected {expected} blend maps, found {count}" );
+		if ( count != expected ) throw new InvalidDataException( $"Expected {expected} poly maps, found {count}" );
 
 		var maps = new ushort[count][];
 		int dim = 0;
@@ -159,14 +211,14 @@ sealed class AwTerrainFile
 		{
 			int index = (int)U32( b, ref p );
 			int d = (int)U32( b, ref p );
-			if ( index != i || d <= 0 || d > 64 ) throw new InvalidDataException( "Bad blend map" );
+			if ( index != i || d <= 0 || d > 64 || (dim != 0 && d != dim) ) throw new InvalidDataException( "Bad poly map" );
 			dim = d;
 			var m = new ushort[d * d];
 			for ( int k = 0; k < m.Length; k++ ) m[k] = BitConverter.ToUInt16( b, p + k * 2 );
 			p += d * d * 2;
 			maps[i] = m;
 		}
-		return (dim, maps);
+		return new PolyMaps { Dim = Math.Max( 1, dim ), Maps = maps, CornerAligned = cornerAligned };
 	}
 
 	static uint U32( byte[] b, ref int p ) { uint v = BitConverter.ToUInt32( b, p ); p += 4; return v; }

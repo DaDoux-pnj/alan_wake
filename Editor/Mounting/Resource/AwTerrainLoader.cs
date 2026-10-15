@@ -5,8 +5,8 @@ namespace Sandbox.Mounting;
 
 /// <summary>
 /// Builds the terrain model of one 128 m world cell: the low detail quad mesh, displaced by the high detail
-/// height grids, textured with the game's 3 layer height blend (shaders/aw_terrain.shader).
-/// LOD1 keeps only the displaced quad corners.
+/// height grids, lit with the game's terrain normal maps and textured with its 3 layer height blend
+/// (shaders/aw_terrain.shader). LOD1 keeps only the displaced quad corners.
 /// </summary>
 sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 {
@@ -42,9 +42,9 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 				}
 			}
 
-			var maps = terrain.HdBlend ?? terrain.Blend;
-			int dim = terrain.HdBlend is not null ? terrain.HdBlendDim : terrain.BlendDim;
-			var atlas = BuildAtlas( maps, dim, terrain.Polys.Length, out int cols, out int atlasW, out int atlasH );
+			var blend = terrain.HdBlend ?? terrain.Blend;
+			var normalMaps = terrain.HdNormalMaps ?? terrain.NormalMaps;
+			var atlas = BuildAtlas( blend, terrain.Polys.Length, out int cols, out int atlasW, out int atlasH );
 
 			// Background cells (low detail only) have no height grids: subdividing them adds nothing, and nobody
 			// can walk on them, so they get flat quads and no collision.
@@ -53,8 +53,8 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 			bool useLod = AlanWakeMount.TerrainLodDistance > 0 && subdivisions > 1;
 			bool collide = AlanWakeMount.Collision && detailed;
 
-			var lod0 = Generate( terrain, subdivisions, cols, dim, atlasW, atlasH );
-			var lod1 = useLod ? Generate( terrain, 1, cols, dim, atlasW, atlasH ) : null;
+			var lod0 = Generate( terrain, subdivisions, blend, normalMaps, cols, atlasW, atlasH );
+			var lod1 = useLod ? Generate( terrain, 1, blend, normalMaps, cols, atlasW, atlasH ) : null;
 
 			var builder = Model.Builder.WithName( Path );
 			var materials = new Dictionary<int, Material>();
@@ -100,7 +100,7 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 				builder.AddCollisionMesh( collisionPositions, collisionIndices );
 
 			if ( AlanWakeMount.DebugLog )
-				Log.Info( $"[AW] terrain {cell.World}/{cell.Level}/{cell.Name}: {terrain.Polys.Length} polys, {materials.Count} materials, hd={terrain.Heights is not null}" );
+				Log.Info( $"[AW] terrain {cell.World}/{cell.Level}/{cell.Name}: {terrain.Polys.Length} polys, {materials.Count} materials, hd={terrain.Heights is not null}, hd maps={terrain.HdBlend is not null}" );
 
 			return builder.Create();
 		}
@@ -129,31 +129,30 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 	}
 
 	/// <summary>
-	/// Packs every poly's blend map into one RGBA atlas: R/G = layer thresholds, B = brightness.
+	/// Packs every poly's blend map into one RGBA atlas: R/G = layer thresholds, B = baked brightness.
+	/// Without blend maps every sample shows the base layer at full brightness.
 	/// </summary>
-	static Texture BuildAtlas( ushort[][] maps, int dim, int polyCount, out int cols, out int width, out int height )
+	static Texture BuildAtlas( AwTerrainFile.PolyMaps blend, int polyCount, out int cols, out int width, out int height )
 	{
-		dim = Math.Max( 1, dim );
+		int dim = blend?.Dim ?? 1;
 		cols = Math.Max( 1, (int)MathF.Ceiling( MathF.Sqrt( Math.Max( 1, polyCount ) ) ) );
 		int rows = Math.Max( 1, (polyCount + cols - 1) / cols );
 		width = cols * dim;
 		height = rows * dim;
 
 		var data = new byte[width * height * 4];
-		int mode = AlanWakeMount.TerrainBlendMode;
 		for ( int i = 0; i < polyCount; i++ )
 		{
-			var map = i < maps.Length ? maps[i] : null;
+			var map = blend is not null && i < blend.Maps.Length ? blend.Maps[i] : null;
 			int tx = (i % cols) * dim, ty = (i / cols) * dim;
 			for ( int r = 0; r < dim; r++ )
 			for ( int c = 0; c < dim; c++ )
 			{
-				ushort v = map is not null && r * dim + c < map.Length ? map[r * dim + c] : (ushort)0x7FFF;
-				int f10 = (v >> 10) & 31, f5 = (v >> 5) & 31, f0 = v & 31;
+				ushort v = map is not null && r * dim + c < map.Length ? map[r * dim + c] : (ushort)0x001F;
 				int o = ((ty + r) * width + tx + c) * 4;
-				data[o + 0] = (byte)((mode == 0 ? f10 : f0) * 255 / 31);
-				data[o + 1] = (byte)((mode == 0 ? f0 : f10) * 255 / 31);
-				data[o + 2] = (byte)(f5 * 255 / 31);
+				data[o + 0] = (byte)(((v >> 10) & 31) * 255 / 31);
+				data[o + 1] = (byte)(((v >> 5) & 31) * 255 / 31);
+				data[o + 2] = (byte)((v & 31) * 255 / 31);
 				data[o + 3] = 255;
 			}
 		}
@@ -172,13 +171,23 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 		return a + (b - a) * t;
 	}
 
-	static Dictionary<int, Batch> Generate( AwTerrainFile t, int segments, int cols, int dim, int atlasW, int atlasH )
+	static Vector4 TangentFor( Vector3 normal )
+	{
+		var tangent = Vector3.Cross( normal, Vector3.Left );
+		if ( tangent.LengthSquared < 1e-6f ) tangent = Vector3.Cross( normal, Vector3.Forward );
+		return new Vector4( tangent.Normal, 1 );
+	}
+
+	static Dictionary<int, Batch> Generate( AwTerrainFile t, int segments, AwTerrainFile.PolyMaps blend, AwTerrainFile.PolyMaps normalMaps,
+		int cols, int atlasW, int atlasH )
 	{
 		var batches = new Dictionary<int, Batch>();
 		int stride = segments + 1;
+		int dim = blend?.Dim ?? 1;
 		var cornerVertex = new int[4];
 		var cornerSlot = new int[4];
 		var luv = new float[4, 6];
+		const int period = AwTerrainFile.LayerUvPeriod;
 
 		for ( int i = 0; i < t.Polys.Length; i++ )
 		{
@@ -205,18 +214,19 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 			var N0 = t.Normals[cornerVertex[0]]; var N1 = t.Normals[cornerVertex[1]];
 			var N2 = t.Normals[cornerVertex[2]]; var N3 = t.Normals[cornerVertex[3]];
 
-			// Layer uvs wrap at 16 bits; unwrap every corner relative to corner 0, then scale by 1/1024.
+			// Layer uvs wrap at 16 bits; unwrap every corner relative to corner 0 (keeping its offset within one
+			// texture repeat), then scale to repeats.
 			for ( int layer = 0; layer < 3; layer++ )
 			{
 				int u0 = p.CornerUv[cornerSlot[0] * 8 + layer * 2];
 				int v0 = p.CornerUv[cornerSlot[0] * 8 + layer * 2 + 1];
-				int baseU = u0 & ~1023, baseV = v0 & ~1023;
+				int baseU = u0 & ~(period - 1), baseV = v0 & ~(period - 1);
 				for ( int k = 0; k < 4; k++ )
 				{
 					int u = p.CornerUv[cornerSlot[k] * 8 + layer * 2];
 					int v = p.CornerUv[cornerSlot[k] * 8 + layer * 2 + 1];
-					luv[k, layer * 2] = (u0 - baseU + (short)(u - u0)) / 1024f;
-					luv[k, layer * 2 + 1] = (v0 - baseV + (short)(v - v0)) / 1024f;
+					luv[k, layer * 2] = (u0 - baseU + (short)(u - u0)) / (float)period;
+					luv[k, layer * 2 + 1] = (v0 - baseV + (short)(v - v0)) / (float)period;
 				}
 			}
 
@@ -243,17 +253,23 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 				if ( heights is not null )
 					pos += nrm * (heights[gr * 16 + gc] / 2048f);
 
+				// The game lights its terrain with these world space normal maps, not the mesh normals.
+				var mapNormal = normalMaps?.SampleNormal( i, s, tt ) ?? Vector3.Zero;
+				var normal = mapNormal.LengthSquared > 0.5f
+					? AwSpace.Direction( mapNormal.x, mapNormal.y, mapNormal.z ).Normal
+					: AwSpace.Direction( nrm.x, nrm.y, nrm.z ).Normal;
+
 				float w00 = (1 - s) * (1 - tt), w10 = s * (1 - tt), w11 = s * tt, w01 = (1 - s) * tt;
 				float U( int k ) => luv[0, k] * w00 + luv[1, k] * w10 + luv[2, k] * w11 + luv[3, k] * w01;
 
-				float ax = (tileX + gc * (dim - 1) / 15f + 0.5f) / atlasW;
-				float ay = (tileY + gr * (dim - 1) / 15f + 0.5f) / atlasH;
+				float ax = (tileX + (blend?.Coord( s ) ?? 0.5f)) / atlasW;
+				float ay = (tileY + (blend?.Coord( tt ) ?? 0.5f)) / atlasH;
 
 				batch.Vertices.Add( new AwTerrainVertex
 				{
 					Position = AwSpace.Position( pos ),
-					Normal = AwSpace.Direction( nrm.x, nrm.y, nrm.z ).Normal,
-					Tangent = new Vector4( 1, 0, 0, 1 ),
+					Normal = normal,
+					Tangent = TangentFor( normal ),
 					TexCoord0 = new Vector2( U( 0 ), U( 1 ) ),
 					TexCoord1 = new Vector2( U( 2 ), U( 3 ) ),
 					LayerUv01 = new Vector4( U( 0 ), U( 1 ), U( 2 ), U( 3 ) ),
@@ -279,11 +295,12 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 			}
 		}
 
-		SmoothNormals( batches );
+		if ( normalMaps is null )
+			SmoothNormals( batches );
 		return batches;
 	}
 
-	/// <summary>Recomputes normals from the displaced surface, shared across quad borders.</summary>
+	/// <summary>Fallback when a cell has no normal maps: normals from the displaced surface, shared across quad borders.</summary>
 	static void SmoothNormals( Dictionary<int, Batch> batches )
 	{
 		var sums = new Dictionary<(int, int, int), Vector3>();
@@ -319,9 +336,7 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 					vert.Normal = nn;
 				}
 
-				var tangent = Vector3.Cross( vert.Normal, Vector3.Left );
-				if ( tangent.LengthSquared < 1e-6f ) tangent = Vector3.Cross( vert.Normal, Vector3.Forward );
-				vert.Tangent = new Vector4( tangent.Normal, 1 );
+				vert.Tangent = TangentFor( vert.Normal );
 				v[i] = vert;
 			}
 		}
