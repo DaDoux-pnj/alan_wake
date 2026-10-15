@@ -147,8 +147,8 @@ sealed class AwMapLoader( string world, List<string> levels, List<AwCellInfo> ce
 	{
 		var sun = new GameObject { Name = "Sun", WorldRotation = Rotation.From( new Angles( 45, 15, 0 ) ) };
 		var light = sun.AddComponent<DirectionalLight>();
-		light.LightColor = new Color( 0.94419f, 0.97767f, 1f );
-		light.SkyColor = new Color( 0.2532f, 0.32006f, 0.35349f );
+		light.LightColor = Color.White;
+		light.SkyColor = new Color( 0.561f, 0.627f, 0.690f, 1.0f );
 		light.Shadows = true;
 
 		var sky = new GameObject { Name = "Sky" };
