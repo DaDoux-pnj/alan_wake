@@ -30,6 +30,20 @@ struct AwTerrainVertex
 }
 
 /// <summary>
+/// Water vertex for shaders/aw_water.shader: the tangent points downstream, colour = (flow speed in world units/s,
+/// wave strength, foam, unused).
+/// </summary>
+[StructLayout( LayoutKind.Sequential )]
+struct AwWaterVertex
+{
+	[VertexLayout.Position] public Vector3 Position;
+	[VertexLayout.Normal] public Vector3 Normal;
+	[VertexLayout.Tangent] public Vector4 Tangent;
+	[VertexLayout.TexCoord( 0 )] public Vector2 TexCoord;
+	[VertexLayout.Color] public Color Color;
+}
+
+/// <summary>
 /// Creates and caches s&amp;box materials/textures for Alan Wake assets. Props use the stock complex shader,
 /// windows the stock glass shader, terrain uses shaders/aw_terrain.shader (3 layer height blend, same maths as the
 /// game's terrain baker).
@@ -39,6 +53,7 @@ static class AwMaterials
 	const string ObjectShader = "shaders/complex.shader";
 	const string GlassShader = "shaders/glass.shader";
 	const string TerrainShader = "shaders/aw_terrain.shader";
+	const string WaterShader = "shaders/aw_water.shader";
 
 	static readonly object Lock = new();
 	static readonly Dictionary<string, Material> Materials = new( StringComparer.OrdinalIgnoreCase );
@@ -104,7 +119,8 @@ static class AwMaterials
 
 	/// <summary>
 	/// Game normal maps are DXT5nm (X in alpha, Y in green). Decode them into a regular RGB normal map with
-	/// roughness in alpha, which is what the complex shader samples from g_tNormal.
+	/// roughness in alpha, which is what the complex shader samples from g_tNormal. A few uncompressed maps (the lakes'
+	/// water) store the normal with Y up instead: the slopes in red and blue, up in green.
 	/// </summary>
 	public static Texture Normal( AlanWakeMount host, string path, float roughness )
 	{
@@ -129,14 +145,25 @@ static class AwMaterials
 				var header = AwTextureFile.ReadHeader( bytes );
 				var rgba = AwTextureFile.DecodeRgba( bytes, AlanWakeMount.NormalMapMaxSize, out int w, out int h );
 				bool swizzled = AwTextureFile.IsDxt5( header.Format );
+				bool yUp = !swizzled && IsYUpNormalMap( rgba );
 				bool flipGreen = AlanWakeMount.NormalMapFlipGreen;
 				for ( int i = 0; i < w * h; i++ )
 				{
 					int o = i * 4;
 					float x = (swizzled ? rgba[o + 3] : rgba[o]) / 255f * 2f - 1f;
-					float y = rgba[o + 1] / 255f * 2f - 1f;
+					float y = (yUp ? rgba[o + 2] : rgba[o + 1]) / 255f * 2f - 1f;
 					if ( flipGreen ) y = -y;
-					float z = MathF.Sqrt( MathF.Max( 0f, 1f - x * x - y * y ) );
+					float z;
+					if ( yUp )
+					{
+						z = rgba[o + 1] / 255f * 2f - 1f;
+						float length = MathF.Sqrt( x * x + y * y + z * z );
+						if ( length > 1e-4f ) { x /= length; y /= length; z /= length; }
+					}
+					else
+					{
+						z = MathF.Sqrt( MathF.Max( 0f, 1f - x * x - y * y ) );
+					}
 					rgba[o + 0] = (byte)Math.Clamp( (x * 0.5f + 0.5f) * 255f, 0, 255 );
 					rgba[o + 1] = (byte)Math.Clamp( (y * 0.5f + 0.5f) * 255f, 0, 255 );
 					rgba[o + 2] = (byte)Math.Clamp( (z * 0.5f + 0.5f) * 255f, 0, 255 );
@@ -159,6 +186,23 @@ static class AwMaterials
 		return texture ?? FlatNormal( r );
 	}
 
+	/// <summary>
+	/// True for normal maps stored with Y up (green brighter than blue on average); tangent space maps keep up in blue.
+	/// </summary>
+	static bool IsYUpNormalMap( byte[] rgba )
+	{
+		long green = 0, blue = 0;
+		int count = 0;
+		for ( int o = 0; o + 3 < rgba.Length; o += 4 * 7 )
+		{
+			green += rgba[o + 1];
+			blue += rgba[o + 2];
+			count++;
+		}
+
+		return count > 0 && (green - blue) / (float)count > 38f;
+	}
+
 	static Texture FlatNormal( byte roughness )
 	{
 		int key = roughness / 16;
@@ -172,10 +216,16 @@ static class AwMaterials
 		}
 	}
 
+	/// <summary>Water.rfx (lakes, ponds) and River.rfx (rivers, waterfalls): built with <see cref="AwWaterVertex"/>.</summary>
+	public static bool IsWater( AwMeshFile.MaterialDef def )
+		=> def is not null && (def.Shader.StartsWith( "Water", StringComparison.OrdinalIgnoreCase ) || def.Shader.StartsWith( "River", StringComparison.OrdinalIgnoreCase ));
+
 	public static Material ForMesh( AlanWakeMount host, AwMeshFile.MaterialDef def )
 	{
 		if ( def.Shader.StartsWith( "Glass", StringComparison.OrdinalIgnoreCase ) )
 			return ForGlass( host, def );
+		if ( IsWater( def ) )
+			return ForWater( host, def );
 
 		var colorPath = def.Texture( "g_sColorMap" ) ?? def.Texture( "g_sVideoMap" ) ?? "";
 		var normalPath = def.Texture( "g_sNormalMap" ) ?? "";
@@ -240,6 +290,67 @@ static class AwMaterials
 
 		float exponent = 3f / (1f - gloss);
 		return Math.Clamp( MathF.Sqrt( 2f / (exponent + 2f) ), 0.55f, 1f );
+	}
+
+	/// <summary>
+	/// Lakes (Water.rfx) and rivers (River.rfx) on shaders/aw_water.shader (Water Tool 2's water): the game's water normal
+	/// map drifting over a depth tinted, refracting surface with fresnel and screen space reflections. Rivers carry
+	/// their normals and foam downstream (see <see cref="AwModelLoader.BuildWaterMesh"/>).
+	/// </summary>
+	static Material ForWater( AlanWakeMount host, AwMeshFile.MaterialDef def )
+	{
+		bool river = def.Shader.StartsWith( "River", StringComparison.OrdinalIgnoreCase );
+		var normalPath = def.Texture( "g_sNormalMap" ) ?? "";
+		var key = $"water|{river}|{normalPath}";
+		lock ( Lock )
+		{
+			if ( Materials.TryGetValue( key, out var cached ) )
+				return cached;
+		}
+
+		var material = Material.Create( $"alan_wake/materials/m{System.Threading.Interlocked.Increment( ref _counter )}", WaterShader, false );
+		material.SetFeature( "F_TRANSLUCENT", 1 );
+		material.SetFeature( "F_RENDER_BACKFACES", 1 );
+		material.SetFeature( "F_DO_NOT_CAST_SHADOWS", 1 );
+
+		var normal = Normal( host, normalPath, 0f );
+		material.Set( "g_tMainNormal", normal );
+		material.Set( "g_tSecondNormal", normal );
+		material.Set( "g_vNormalTiling", river ? new Vector2( 0.01f, 0.01f ) : new Vector2( 0.006f, 0.006f ) );
+		material.Set( "g_flSpeedMainNormal", 50f );
+		material.Set( "g_flSpeedSecondNormal", -25f );
+		material.Set( "g_flNormalStrength", river ? 0.06f : 0.04f );
+		material.Set( "g_flFlowCycle", 2f );
+
+		material.Set( "g_flRefractionStrength", 0.1f );
+		material.Set( "g_vShallowColor", new Color( 0.247f, 0.400f, 0.424f, 0.588f ) );
+		material.Set( "g_vDeepColor", new Color( 0.016f, 0.051f, 0.055f, 0.922f ) );
+		material.Set( "g_flDepthMax", 1000f );
+		material.Set( "g_flDepthMultiplier", 0.7f );
+		material.Set( "g_flDepthFalloff", 0.5f );
+		material.Set( "g_flDepthBlend", 1f );
+		material.Set( "g_flShoreOpacity", 0f );
+		material.Set( "g_flShoreOpacityRange", 10f );
+
+		material.Set( "g_flFoamIntensity", 0f );
+		material.Set( "g_flFlowFoamIntensity", 1f );
+		material.Set( "g_flFlowFoamScale", 6f );
+		material.Set( "g_vFoamColor", global::Color.White );
+
+		material.Set( "g_flFresnelBias", 0.2f );
+		material.Set( "g_flFresnelPower", 5f );
+		material.Set( "g_vFresnelColor", new Color( 0.478f, 0.647f, 0.765f, 1f ) );
+
+		material.Set( "g_bUseScreenSpaceReflection", true );
+		material.Set( "g_flReflectionStrength", 1f );
+		material.Set( "g_flReflectionStepSize", 500f );
+		material.Set( "g_flFoamReflectionStrength", 0f );
+
+		material.Set( "g_flRoughness", 0f );
+		material.Set( "g_flContrast", 1.3f );
+
+		lock ( Lock ) Materials[key] = material;
+		return material;
 	}
 
 	/// <summary>

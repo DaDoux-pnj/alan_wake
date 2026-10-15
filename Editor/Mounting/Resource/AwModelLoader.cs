@@ -37,7 +37,9 @@ sealed class AwModelLoader( string archivePath, bool physics = false ) : Resourc
 
 				var def = sub.MaterialIndex < file.Materials.Count ? file.Materials[sub.MaterialIndex] : null;
 				var material = def is null ? Material.Load( "materials/dev/dev_measure.vmat" ) : AwMaterials.ForMesh( Host, def );
-				var mesh = BuildMesh( material, sub, out var subBounds );
+				bool water = AwMaterials.IsWater( def );
+				BBox subBounds;
+				var mesh = water ? BuildWaterMesh( material, sub, def, out subBounds ) : BuildMesh( material, sub, out subBounds );
 
 				if ( hasLod1 ) builder.AddMesh( mesh, sub.Lod );
 				else builder.AddMesh( mesh );
@@ -48,9 +50,9 @@ sealed class AwModelLoader( string archivePath, bool physics = false ) : Resourc
 					bounds = boundsSet ? bounds.AddBBox( subBounds ) : subBounds;
 					boundsSet = true;
 
-					// Glass still counts for physics props: a bottle's hull is the whole bottle.
-					bool solid = def is null || !(def.Translucent || def.Shader.StartsWith( "Glass", StringComparison.OrdinalIgnoreCase ) || def.Shader.StartsWith( "Water", StringComparison.OrdinalIgnoreCase ));
-					if ( (solid || physics) && AlanWakeMount.Collision )
+					// Glass still counts for physics props: a bottle's hull is the whole bottle. Water never collides.
+					bool solid = def is null || !(def.Translucent || def.Shader.StartsWith( "Glass", StringComparison.OrdinalIgnoreCase ));
+					if ( (solid || physics) && !water && AlanWakeMount.Collision )
 					{
 						int baseIndex = collisionPositions.Count;
 						collisionPositions.AddRange( sub.Positions );
@@ -91,6 +93,85 @@ sealed class AwModelLoader( string archivePath, bool physics = false ) : Resourc
 			Log.Warning( $"[AW] mesh '{archivePath}' failed: {ex.Message}" );
 			return null;
 		}
+	}
+
+	/// <summary>
+	/// Water surface for shaders/aw_water.shader. River.rfx scrolls its colour map towards -V at g_fVelocity repeats of
+	/// g_vTexCoordScale.y per second, so the water runs along -dP/dv at velocity / scale.y * |dP/dv| world units per
+	/// second: the tangent is laid downstream and the colour carries that speed. Lakes (Water.rfx) are still. Steep river
+	/// pieces (waterfalls) churn with foam, the rest carries a little.
+	/// </summary>
+	internal static Mesh BuildWaterMesh( Material material, AwMeshFile.SubMesh sub, AwMeshFile.MaterialDef def, out BBox bounds )
+	{
+		int n = sub.Positions.Length;
+		var idx = sub.Indices;
+		bool river = def.Shader.StartsWith( "River", StringComparison.OrdinalIgnoreCase );
+		var dPdv = new Vector3[n];
+		var counts = new int[n];
+
+		if ( river )
+		{
+			for ( int t = 0; t + 2 < idx.Length; t += 3 )
+			{
+				int a = idx[t], b = idx[t + 1], c = idx[t + 2];
+				if ( a >= n || b >= n || c >= n ) continue;
+				var e1 = sub.Positions[b] - sub.Positions[a];
+				var e2 = sub.Positions[c] - sub.Positions[a];
+				var d1 = sub.Uv0[b] - sub.Uv0[a];
+				var d2 = sub.Uv0[c] - sub.Uv0[a];
+				float det = d1.x * d2.y - d2.x * d1.y;
+				if ( MathF.Abs( det ) < 1e-12f ) continue;
+				var along = (e2 * d1.x - e1 * d2.x) / det;
+				dPdv[a] += along; dPdv[b] += along; dPdv[c] += along;
+				counts[a]++; counts[b]++; counts[c]++;
+			}
+		}
+
+		var texScale = def.Vector( "g_vTexCoordScale" );
+		float scaleV = texScale is { Length: >= 2 } && texScale[1] > 0 ? texScale[1] : 1f;
+		float velocity = def.Value( "g_fVelocity", 0f );
+
+		var verts = new List<AwWaterVertex>( n );
+		var min = new Vector3( float.MaxValue );
+		var max = new Vector3( float.MinValue );
+		for ( int i = 0; i < n; i++ )
+		{
+			var normal = sub.Normals[i];
+			float speed = 0;
+			var downstream = Vector3.Forward;
+			if ( counts[i] > 0 )
+			{
+				var gradient = dPdv[i] / counts[i];
+				speed = velocity / scaleV * gradient.Length;
+				downstream = -gradient;
+			}
+
+			var tangent = downstream - normal * Vector3.Dot( normal, downstream );
+			if ( tangent.LengthSquared < 1e-8f )
+				tangent = MathF.Abs( normal.z ) < 0.9f ? Vector3.Cross( Vector3.Up, normal ) : Vector3.Cross( normal, Vector3.Left );
+
+			float foam = !river ? 0f : MathF.Abs( normal.z ) < 0.6f ? 1f : 0.2f;
+
+			var p = sub.Positions[i];
+			min = Vector3.Min( min, p );
+			max = Vector3.Max( max, p );
+
+			verts.Add( new AwWaterVertex
+			{
+				Position = p,
+				Normal = normal,
+				Tangent = new Vector4( tangent.Normal, 1 ),
+				TexCoord = sub.Uv0[i],
+				Color = new Color( speed, 1f, foam, 0f ),
+			} );
+		}
+
+		bounds = new BBox( min, max );
+		var mesh = new Mesh( material, MeshPrimitiveType.Triangles );
+		mesh.CreateVertexBuffer( verts.Count, verts );
+		mesh.CreateIndexBuffer( idx.Length, new List<int>( idx ) );
+		mesh.Bounds = bounds;
+		return mesh;
 	}
 
 	internal static Mesh BuildMesh( Material material, AwMeshFile.SubMesh sub, out BBox bounds )
