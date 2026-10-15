@@ -8,7 +8,8 @@ namespace Sandbox.Mounting;
 /// One playable area as a map for s&amp;box's map picker (mount://alan_wake/maps/{name}.scene). The game streams an
 /// area in parts ("brightfalls_part_1" to "_4", "cauldronlake_01" to "_09"); the map holds all of them: every cell
 /// and the parts' extras as prefab instances, moved so the playable cells sit around the origin (heights kept), the
-/// sun and sky of the alan_wake project's scene, and a spawn point on open ground near the middle.
+/// sun and sky of the alan_wake project's scene, the area's ambient sounds, and a spawn point on open ground near the
+/// middle.
 /// Games load it through MapInstance; grass and trees only show in games that have the grass and foliage renderer
 /// components (see <see cref="AwStaticPlacer"/>).
 /// </summary>
@@ -65,8 +66,63 @@ sealed class AwMapLoader( string world, List<string> levels, List<AwCellInfo> ce
 		}
 
 		AddSunAndSky();
+		AddSounds( root );
 		AddSpawn( playable, middle, offset, cellObjects );
 	}
+
+	/// <summary>Areas the game also visits in daylight (it has day ambience tracks for them), so day sounds win there.</summary>
+	static readonly HashSet<string> DaytimeMaps = new( StringComparer.OrdinalIgnoreCase ) { "brightfalls", "level2", "level_16" };
+
+	/// <summary>
+	/// The ambience of the whole map: the sound emitters of its cells, its level files and the episodes (whose scripts
+	/// run them here), filtered by <see cref="AwSoundPlacer.Collect"/>. Daytime is preferred (aw_sound_daytime): a map
+	/// with day ambience (a daylight area, or a fair share of day sounds) drops its night sounds; a map with night
+	/// ambience only keeps it. The game's 2D area loops (ambient_tracks) are left out: too loud, and out of place.
+	/// </summary>
+	void AddSounds( GameObject root )
+	{
+		if ( !AlanWakeMount.Sounds || Host.GetSoundDatabase() is not { } db )
+			return;
+
+		var instances = new List<AwSoundInstances.Instance>();
+		foreach ( var cell in cells )
+		{
+			foreach ( var container in new[] { cell.HighDetailPath, cell.LowDetailPath } )
+			{
+				if ( AwStaticPlacer.ReadContainer( Host, container ) is { } blobs )
+					AwSoundInstances.Read( blobs, instances );
+			}
+		}
+
+		foreach ( var level in levels )
+		{
+			foreach ( var file in Host.LevelFiles.GetValueOrDefault( $"{world}/{level}" ) ?? new List<string>() )
+			{
+				if ( AwStaticPlacer.ReadContainer( Host, file ) is { } blobs )
+					AwSoundInstances.Read( blobs, instances );
+			}
+		}
+
+		var inside = new HashSet<(int, int)>( cells.Select( c => (c.X, c.Z) ) );
+		instances.AddRange( Host.GetEpisodeSounds( world ).Where( x => inside.Contains( CellOf( x.Position ) ) ) );
+
+		var emitters = AwSoundPlacer.Collect( db, instances.Where( x => !IsAmbientTrack( db, x ) ) );
+		int day = emitters.Count( e => e.Tag == "day" ), night = emitters.Count( e => e.Tag == "night" );
+		bool hasDay = DaytimeMaps.Contains( Name ) || (day > 0 && day * 10 >= day + night);
+		bool daytime = AlanWakeMount.SoundDaytime ? hasDay : night == 0;
+		string dropped = daytime ? "night" : "day";
+
+		int placed = AwSoundPlacer.Place( root, "sounds", emitters.Where( e => e.Tag != dropped ) );
+		Log.Info( $"[AW] map {Name}: {placed} ambient sounds ({(daytime ? "day" : "night")})" );
+	}
+
+	/// <summary>The rare placed emitter of one of the game's 2D area loops (ambient_tracks), left out like the beds.</summary>
+	static bool IsAmbientTrack( AwSoundDatabase db, AwSoundInstances.Instance instance )
+		=> instance.Class == 18 && db.Sounds.TryGetValue( instance.Gid, out var sound )
+			&& (sound.Name ?? "").Contains( "ambient_tracks", StringComparison.OrdinalIgnoreCase );
+
+	static (int, int) CellOf( Vector3 metres )
+		=> ((int)MathF.Floor( metres.x / AwSpace.CellSize ) + AwSpace.CellBias, (int)MathF.Floor( metres.z / AwSpace.CellSize ) + AwSpace.CellBias);
 
 	IEnumerable<AwCellInfo> CellsOf( string level ) => cells.Where( c => c.Level == level ).OrderBy( c => c.X ).ThenBy( c => c.Z );
 

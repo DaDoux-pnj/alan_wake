@@ -23,5 +23,8 @@ The mount turns each playable area into a map, with all of the area's parts: `mo
 - **Players need the mount:** a published game can't include it, so players need Alan Wake installed and a copy of the `sbox/mount/alan_wake` folder.
 - **In other games:** any game that lets you pick a map lists them under Alan Wake. Grass and trees only show in games that include `Code/AwGrassRenderer.cs` and `Code/AwFoliageRenderer.cs`.
 
+## Sounds
+Every sound bank of the game is a sound under `mount://alan_wake/audio/...`. Maps get the game's ambience as Sound Point components: looping emitters (rivers, hums, fluorescent lights), the game's "simulated" random ambience (birds, owls, crickets, creaks) repeating at the game's own intervals, and ambience one-shots. Since the game's scripts switch every placed sound on and off as the story goes, only sounds named as ambience are kept: no scripted events, music, dialogue, combat, or the game's 2D area loops. Daytime ambience is preferred where a map has some (`aw_sound_daytime`, daylight areas listed in `DaytimeMaps`, `Mount/Resource/AwMapLoader.cs`); night-only areas keep theirs. Settings: `aw_sounds`, `aw_sound_volume`, `aw_sound_daytime`.
+
 ## Settings
 `sbox/mount/alan_wake/alan_wake.json` is written with the defaults the first time the game is mounted. After editing it, toggle the alan_wake mount off and on (or restart s&box) and place the level again.

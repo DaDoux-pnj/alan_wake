@@ -14,6 +14,7 @@ namespace Sandbox.Mounting;
 /// Registered resources:
 ///   objects/...            .binmsh meshes            -> Model     mount://alan_wake/objects/....vmdl
 ///   textures/...           .tex textures             -> Texture   mount://alan_wake/textures/....vtex
+///   audio/...              .fsb sound banks          -> Sound     mount://alan_wake/audio/....vsnd (see AwSoundBank)
 ///   worlds/{world}/{level}/terrain_XXX_ZZZ            -> Model     (displaced terrain of one 128 m cell)
 ///   worlds/{world}/{level}/cell_XXX_ZZZ               -> Prefab    (terrain + static meshes of the cell)
 ///   worlds/{world}/{level}/{level}_extras             -> Prefab    (level-wide statics, interiors)
@@ -37,6 +38,9 @@ public class AlanWakeMount : BaseGameMount
 
 	/// <summary>All world cells, keyed by "world/level".</summary>
 	internal readonly Dictionary<string, List<AwCellInfo>> CellsByLevel = new( StringComparer.OrdinalIgnoreCase );
+
+	/// <summary>A level's other world containers (global.bin, interiors...), keyed by "world/level".</summary>
+	internal Dictionary<string, List<string>> LevelFiles { get; private set; } = new( StringComparer.OrdinalIgnoreCase );
 
 	// Settings, from alan_wake.json next to the DLL (see AwSettings): the values below are the defaults.
 
@@ -115,7 +119,78 @@ public class AlanWakeMount : BaseGameMount
 	[AwSetting( "aw_grass_wind", "Inches the grass tips sway in the wind (0 = still)." )]
 	public static float GrassWind { get; set; } = 3;
 
+	[AwSetting( "aw_sounds", "Give maps the game's ambient sounds (birds, rivers, creaks, hums...)." )]
+	public static bool Sounds { get; set; } = true;
+
+	[AwSetting( "aw_sound_daytime", "Prefer daytime ambience: maps that have some leave out their night sounds (owls, crickets...). Off prefers night." )]
+	public static bool SoundDaytime { get; set; } = true;
+
+	[AwSetting( "aw_sound_volume", "Multiplier on the game's sound volumes." )]
+	public static float SoundVolume { get; set; } = 1;
+
 	internal const string GrassPath = "grass/grass.bingrs";
+
+	/// <summary>The s&amp;box sound of a sound bank, e.g. audio/ambience/x.fsb -&gt; mount://alan_wake/audio/ambience/x.vsnd.</summary>
+	internal static string SoundPath( string archivePath ) => $"mount://alan_wake/{archivePath[..^".fsb".Length]}.vsnd";
+
+	readonly object _soundLock = new();
+	AwSoundDatabase _sounds;
+	readonly Dictionary<string, List<AwSoundInstances.Instance>> _episodeSounds = new( StringComparer.OrdinalIgnoreCase );
+
+	/// <summary>The game's sound definitions (cached), or null if they can't be read.</summary>
+	internal AwSoundDatabase GetSoundDatabase()
+	{
+		lock ( _soundLock )
+		{
+			if ( _sounds is not null )
+				return _sounds;
+
+			try
+			{
+				_sounds = AwSoundDatabase.Load( Archive );
+			}
+			catch ( Exception ex )
+			{
+				Log.Warning( $"[AW] sound database: {ex.Message}" );
+				_sounds = new AwSoundDatabase();
+			}
+
+			return _sounds;
+		}
+	}
+
+	/// <summary>
+	/// Sound emitters the episodes' task files place in a world (worlds/{world}/episodes/**), cached. The game's scripts
+	/// switch them on as the story goes; a map plays the ones inside it all the time.
+	/// </summary>
+	internal List<AwSoundInstances.Instance> GetEpisodeSounds( string world )
+	{
+		lock ( _soundLock )
+		{
+			if ( _episodeSounds.TryGetValue( world, out var cached ) )
+				return cached;
+		}
+
+		var instances = new List<AwSoundInstances.Instance>();
+		var prefix = $"worlds/{world}/episodes/";
+		foreach ( var path in Archive.Paths )
+		{
+			if ( !path.StartsWith( prefix, StringComparison.OrdinalIgnoreCase ) || !path.EndsWith( ".bin", StringComparison.Ordinal ) )
+				continue;
+
+			try
+			{
+				AwSoundInstances.Read( AwCellFile.Read( Archive.Read( path ) ), instances );
+			}
+			catch ( Exception ex )
+			{
+				if ( DebugLog ) Log.Warning( $"[AW] episode sounds '{path}': {ex.Message}" );
+			}
+		}
+
+		lock ( _soundLock ) _episodeSounds[world] = instances;
+		return instances;
+	}
 
 	internal static string GrassClumpModelPath( int index ) => $"mount://alan_wake/grass/clump_{index:D2}.vmdl";
 
@@ -201,7 +276,7 @@ public class AlanWakeMount : BaseGameMount
 		Archive = AwArchive.Open( Path.Combine( _appDir, "data" ) );
 		Log.Info( $"Alan Wake: {Archive.Count} files in archives" );
 
-		int meshes = 0, textures = 0;
+		int meshes = 0, textures = 0, soundBanks = 0;
 		var cells = new Dictionary<string, AwCellInfo>( StringComparer.OrdinalIgnoreCase );
 		var levelFiles = new Dictionary<string, List<string>>( StringComparer.OrdinalIgnoreCase );
 
@@ -236,6 +311,13 @@ public class AlanWakeMount : BaseGameMount
 				int clumps = header is { Length: >= 8 } ? Math.Clamp( BitConverter.ToInt32( header, 4 ), 0, 64 ) : 0;
 				for ( int i = 0; i < clumps; i++ )
 					context.Add( ResourceType.Model, $"grass/clump_{i:D2}", new AwGrassClumpLoader( i ) );
+				continue;
+			}
+
+			if ( path.StartsWith( "audio/", StringComparison.Ordinal ) && path.EndsWith( ".fsb", StringComparison.Ordinal ) )
+			{
+				context.Add( ResourceType.Sound, path[..^".fsb".Length], new AwSoundLoader( path ) );
+				soundBanks++;
 				continue;
 			}
 
@@ -283,6 +365,7 @@ public class AlanWakeMount : BaseGameMount
 			context.Add( ResourceType.PrefabFile, cell.PrefabResourcePath, prefab );
 		}
 
+		LevelFiles = levelFiles;
 		int extras = 0;
 		foreach ( var (levelKey, files) in levelFiles )
 		{
@@ -305,7 +388,7 @@ public class AlanWakeMount : BaseGameMount
 			maps++;
 		}
 
-		Log.Info( $"Alan Wake: {meshes} meshes, {textures} textures, {CellsByLevel.Sum( x => x.Value.Count )} world cells in {CellsByLevel.Count} levels, {extras} level extras, {maps} maps" );
+		Log.Info( $"Alan Wake: {meshes} meshes, {textures} textures, {soundBanks} sounds, {CellsByLevel.Sum( x => x.Value.Count )} world cells in {CellsByLevel.Count} levels, {extras} level extras, {maps} maps" );
 
 		IsMounted = true;
 		return Task.CompletedTask;
@@ -315,11 +398,17 @@ public class AlanWakeMount : BaseGameMount
 	{
 		AwMaterials.Clear();
 		CellsByLevel.Clear();
+		LevelFiles = new Dictionary<string, List<string>>( StringComparer.OrdinalIgnoreCase );
 		lock ( _foliage ) _foliage.Clear();
 		lock ( _grassLock )
 		{
 			_grass = null;
 			_grassLoaded = false;
+		}
+		lock ( _soundLock )
+		{
+			_sounds = null;
+			_episodeSounds.Clear();
 		}
 		Archive?.Dispose();
 		Archive = null;

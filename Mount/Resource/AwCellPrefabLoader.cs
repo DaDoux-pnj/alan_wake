@@ -6,6 +6,7 @@ namespace Sandbox.Mounting;
 /// <summary>
 /// One world cell as a prefab: terrain, static meshes, dynamic objects (loose props get physics), lights and
 /// foliage. High detail data holds the playable content; low detail data holds distant landmarks/water and trees.
+/// Sounds are placed by the maps (AwMapLoader), which pick the ambience of a whole area at once.
 /// </summary>
 sealed class AwCellPrefabLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 {
