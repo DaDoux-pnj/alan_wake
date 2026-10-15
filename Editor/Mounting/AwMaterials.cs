@@ -31,11 +31,13 @@ struct AwTerrainVertex
 
 /// <summary>
 /// Creates and caches s&amp;box materials/textures for Alan Wake assets. Props use the stock complex shader,
-/// terrain uses shaders/aw_terrain.shader (3 layer height blend, same maths as the game's terrain baker).
+/// windows the stock glass shader, terrain uses shaders/aw_terrain.shader (3 layer height blend, same maths as the
+/// game's terrain baker).
 /// </summary>
 static class AwMaterials
 {
 	const string ObjectShader = "shaders/complex.shader";
+	const string GlassShader = "shaders/glass.shader";
 	const string TerrainShader = "shaders/aw_terrain.shader";
 
 	static readonly object Lock = new();
@@ -43,6 +45,7 @@ static class AwMaterials
 	static readonly Dictionary<string, Texture> ColorTextures = new( StringComparer.OrdinalIgnoreCase );
 	static readonly Dictionary<string, Texture> NormalTextures = new( StringComparer.OrdinalIgnoreCase );
 	static readonly Dictionary<int, Texture> FlatNormals = new();
+	static readonly Dictionary<uint, Texture> SolidTextures = new();
 	static int _counter;
 
 	public static void Clear()
@@ -53,6 +56,21 @@ static class AwMaterials
 			ColorTextures.Clear();
 			NormalTextures.Clear();
 			FlatNormals.Clear();
+			SolidTextures.Clear();
+		}
+	}
+
+	/// <summary>1x1 texture of one RGBA value.</summary>
+	static Texture Solid( byte r, byte g, byte b, byte a )
+	{
+		uint key = (uint)(r | g << 8 | b << 16 | a << 24);
+		lock ( Lock )
+		{
+			if ( SolidTextures.TryGetValue( key, out var t ) )
+				return t;
+			t = Texture.Create( 1, 1 ).WithData( new byte[] { r, g, b, a } ).Finish();
+			SolidTextures[key] = t;
+			return t;
 		}
 	}
 
@@ -156,11 +174,13 @@ static class AwMaterials
 
 	public static Material ForMesh( AlanWakeMount host, AwMeshFile.MaterialDef def )
 	{
+		if ( def.Shader.StartsWith( "Glass", StringComparison.OrdinalIgnoreCase ) )
+			return ForGlass( host, def );
+
 		var colorPath = def.Texture( "g_sColorMap" ) ?? def.Texture( "g_sVideoMap" ) ?? "";
 		var normalPath = def.Texture( "g_sNormalMap" ) ?? "";
 		var tint = def.Vector( "g_vColorMultiplier" );
 		float gloss = def.Value( "g_fGlossiness", 0.2f );
-		bool glass = def.Shader.StartsWith( "Glass", StringComparison.OrdinalIgnoreCase );
 		bool foliage = def.Shader.StartsWith( "Foliage", StringComparison.OrdinalIgnoreCase );
 		bool cutout = def.AlphaTest || (foliage && HasAlpha( host, colorPath ));
 
@@ -183,8 +203,6 @@ static class AwMaterials
 		material.Set( "g_flRoughnessScaleFactor", 1.0f );
 
 		var c = tint is { Length: >= 3 } ? new Color( tint[0], tint[1], tint[2], tint.Length > 3 ? tint[3] : 1f ) : global::Color.White;
-		if ( glass )
-			c = new Color( 0.75f, 0.8f, 0.85f, 0.35f );
 		material.Set( "g_vColorTint", c );
 
 		if ( cutout )
@@ -192,12 +210,56 @@ static class AwMaterials
 			material.SetFeature( "F_ALPHA_TEST", 1 );
 			material.Set( "g_flAlphaTestReference", 0.5f );
 		}
-		else if ( def.Translucent || glass )
+		else if ( def.Translucent )
 		{
 			material.SetFeature( "F_TRANSLUCENT", 1 );
 		}
 
 		if ( def.TwoSided || cutout )
+			material.SetFeature( "F_RENDER_BACKFACES", 1 );
+
+		lock ( Lock ) Materials[key] = material;
+		return material;
+	}
+
+	/// <summary>
+	/// Glass.rfx (every window): a fresnel weighted reflection (20% head-on, rising at grazing angles) over whatever
+	/// sits behind the pane (curtains, interiors), with an optional dirt layer (g_sDirtMap, alpha = coverage, first
+	/// uv set). Mapped onto s&amp;box's glass shader: refraction of the scene behind, environment reflections and the
+	/// dirt as its overlay layer. aw_glass_refraction 0 switches to its cheaper alpha blended mode.
+	/// </summary>
+	static Material ForGlass( AlanWakeMount host, AwMeshFile.MaterialDef def )
+	{
+		var dirtPath = AwArchive.NormalizePath( def.Texture( "g_sDirtMap" ) ?? "" );
+		bool refraction = AlanWakeMount.GlassRefraction;
+		var key = $"glass|{dirtPath}|{def.TwoSided}|{refraction}";
+		lock ( Lock )
+		{
+			if ( Materials.TryGetValue( key, out var cached ) )
+				return cached;
+		}
+
+		var material = Material.Create( $"alan_wake/materials/m{System.Threading.Interlocked.Increment( ref _counter )}", GlassShader, false );
+
+		// Head-on the game lets about 80% of the background through; the simple mode blends by colour alpha.
+		material.Set( "g_tColor", refraction ? Texture.White : Solid( 255, 255, 255, 40 ) );
+		material.Set( "g_flTintColor", new Vector3( 0.85f, 0.85f, 0.85f ) );
+		material.Set( "g_tNormal", FlatNormal( 255 ) );
+		material.Set( "g_tRma", Solid( 13, 0, 255, 0 ) ); // roughness 0.05, no metalness, no occlusion
+		if ( !refraction )
+			material.SetFeature( "F_GLASS_QUALITY", 1 );
+
+		var dirt = Color( host, dirtPath );
+		if ( dirt is not null )
+		{
+			material.SetFeature( "F_OVERLAY_LAYER", 1 );
+			material.Set( "g_tColorB", dirt );
+			material.Set( "g_tNormalB", FlatNormal( 255 ) );
+			material.Set( "g_tRmaB", Solid( 204, 0, 255, 0 ) ); // matte smudges
+			material.Set( "g_flTintColorB", Vector3.One );
+		}
+
+		if ( def.TwoSided )
 			material.SetFeature( "F_RENDER_BACKFACES", 1 );
 
 		lock ( Lock ) Materials[key] = material;

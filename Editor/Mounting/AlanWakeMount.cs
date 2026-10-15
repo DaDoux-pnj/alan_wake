@@ -61,6 +61,10 @@ public class AlanWakeMount : BaseGameMount
 	[ConVar( "aw_normalmap_flip_green", ConVarFlags.Saved )]
 	public static bool NormalMapFlipGreen { get; set; } = true;
 
+	/// <summary>Windows use s&amp;box's refractive glass (true) or its cheaper alpha blended glass (false).</summary>
+	[ConVar( "aw_glass_refraction", ConVarFlags.Saved )]
+	public static bool GlassRefraction { get; set; } = true;
+
 	[ConVar( "aw_collision", ConVarFlags.Saved )]
 	public static bool Collision { get; set; } = true;
 
