@@ -323,8 +323,8 @@ static class AwMaterials
 		material.Set( "g_flFlowCycle", 2f );
 
 		material.Set( "g_flRefractionStrength", 0.1f );
-		material.Set( "g_vShallowColor", new Color( 0.247f, 0.400f, 0.424f, 0.588f ) );
-		material.Set( "g_vDeepColor", new Color( 0.016f, 0.051f, 0.055f, 0.922f ) );
+		material.Set( "g_vShallowColor", new Color( 0.0f, 0.0f, 0.0f, 0.98f ) );
+		material.Set( "g_vDeepColor", new Color( 0.0f, 0.0f, 0.0f, 0.8f ) );
 		material.Set( "g_flDepthMax", 1000f );
 		material.Set( "g_flDepthMultiplier", 0.7f );
 		material.Set( "g_flDepthFalloff", 0.5f );
@@ -339,7 +339,7 @@ static class AwMaterials
 
 		material.Set( "g_flFresnelBias", 0.2f );
 		material.Set( "g_flFresnelPower", 5f );
-		material.Set( "g_vFresnelColor", new Color( 0.478f, 0.647f, 0.765f, 1f ) );
+		material.Set( "g_vFresnelColor", new Color( 0.678f, 0.647f, 0.665f, 1f ) );
 
 		material.Set( "g_bUseScreenSpaceReflection", true );
 		material.Set( "g_flReflectionStrength", 1f );
@@ -397,10 +397,14 @@ static class AwMaterials
 		return material;
 	}
 
-	/// <summary>Alpha-tested, two sided material showing the foliage billboard atlas (impostors).</summary>
+	/// <summary>
+	/// Alpha-tested, two sided material showing the foliage billboard atlas (impostors). The game shades its billboards
+	/// with a precomputed lighting atlas we don't use; aw_foliage_impostor_brightness evens them out with the meshes.
+	/// </summary>
 	public static Material ForImpostor( AlanWakeMount host, string atlasPath )
 	{
-		var key = $"impostor|{atlasPath}";
+		float brightness = Math.Clamp( AlanWakeMount.FoliageImpostorBrightness, 0f, 2f );
+		var key = $"impostor|{atlasPath}|{brightness:0.00}";
 		lock ( Lock )
 		{
 			if ( Materials.TryGetValue( key, out var cached ) )
@@ -413,7 +417,7 @@ static class AwMaterials
 		material.Set( "g_tAmbientOcclusion", Texture.White );
 		material.Set( "g_flMetalness", 0f );
 		material.Set( "g_flRoughnessScaleFactor", 1.0f );
-		material.Set( "g_vColorTint", global::Color.White );
+		material.Set( "g_vColorTint", new Color( brightness, brightness, brightness, 1f ) );
 		material.SetFeature( "F_ALPHA_TEST", 1 );
 		material.Set( "g_flAlphaTestReference", 0.5f );
 		material.SetFeature( "F_RENDER_BACKFACES", 1 );

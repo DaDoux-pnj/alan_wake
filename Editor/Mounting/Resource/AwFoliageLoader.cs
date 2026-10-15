@@ -67,9 +67,14 @@ sealed class AwFoliageModelLoader( string archivePath, bool impostor ) : Resourc
 				new Vector2( u0, v1 ), new Vector2( u1, v1 ), new Vector2( u1, v0 ), new Vector2( u0, v0 ),
 			},
 			Indices = new[] { 0, 2, 1, 0, 3, 2, 4, 6, 5, 4, 7, 6 },
+			// Each quad faces out of its own plane, lit like the side of a tree. Facing straight up (as the ground does)
+			// they caught the whole sky and turned bright: pale trees and lime ferns from afar.
+			Normals = new[]
+			{
+				Vector3.Left, Vector3.Left, Vector3.Left, Vector3.Left,
+				Vector3.Forward, Vector3.Forward, Vector3.Forward, Vector3.Forward,
+			},
 		};
-		sub.Normals = new Vector3[sub.Positions.Length];
-		Array.Fill( sub.Normals, Vector3.Up );
 
 		builder.AddMesh( AwModelLoader.BuildMesh( AwMaterials.ForImpostor( Host, foliage.BillboardAtlas ), sub, out _ ) );
 		return builder.Create();

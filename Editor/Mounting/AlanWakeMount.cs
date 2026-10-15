@@ -101,6 +101,10 @@ public class AlanWakeMount : BaseGameMount
 	[ConVar( "aw_foliage_undergrowth_distance", ConVarFlags.Saved )]
 	public static float UndergrowthDistance { get; set; } = 60;
 
+	/// <summary>Brightness of distant foliage billboards (impostors) relative to their atlas colour.</summary>
+	[ConVar( "aw_foliage_impostor_brightness", ConVarFlags.Saved )]
+	public static float FoliageImpostorBrightness { get; set; } = 0.85f;
+
 	[ConVar( "aw_foliage_undergrowth_shadows", ConVarFlags.Saved )]
 	public static bool UndergrowthShadows { get; set; } = false;
 
