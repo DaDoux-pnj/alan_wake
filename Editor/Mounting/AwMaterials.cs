@@ -180,11 +180,11 @@ static class AwMaterials
 		var colorPath = def.Texture( "g_sColorMap" ) ?? def.Texture( "g_sVideoMap" ) ?? "";
 		var normalPath = def.Texture( "g_sNormalMap" ) ?? "";
 		var tint = def.Vector( "g_vColorMultiplier" );
-		float gloss = def.Value( "g_fGlossiness", 0.2f );
+		float roughness = RoughnessFor( def );
 		bool foliage = def.Shader.StartsWith( "Foliage", StringComparison.OrdinalIgnoreCase );
 		bool cutout = def.AlphaTest || (foliage && HasAlpha( host, colorPath ));
 
-		var key = $"{def.Shader}|{def.Flags}|{def.Blend}|{def.Cull}|{colorPath}|{normalPath}|{(tint is null ? "" : string.Join( ',', tint ))}|{gloss:0.00}";
+		var key = $"{def.Shader}|{def.Flags}|{def.Blend}|{def.Cull}|{colorPath}|{normalPath}|{(tint is null ? "" : string.Join( ',', tint ))}|{roughness:0.00}";
 		lock ( Lock )
 		{
 			if ( Materials.TryGetValue( key, out var cached ) )
@@ -196,7 +196,6 @@ static class AwMaterials
 		var color = Color( host, colorPath );
 		material.Set( "g_tColor", color ?? Texture.White );
 
-		float roughness = Math.Clamp( 1f - gloss, 0.15f, 1f );
 		material.Set( "g_tNormal", Normal( host, normalPath, roughness ) );
 		material.Set( "g_tAmbientOcclusion", Texture.White );
 		material.Set( "g_flMetalness", def.Shader.StartsWith( "Chrome", StringComparison.OrdinalIgnoreCase ) ? 0.5f : 0f );
@@ -220,6 +219,27 @@ static class AwMaterials
 
 		lock ( Lock ) Materials[key] = material;
 		return material;
+	}
+
+	/// <summary>
+	/// The game's StandardMaterial has no environment reflections: only a Phong-like light highlight with exponent
+	/// 3 / (1 - g_fGlossiness), scaled by the specular map. s&amp;box reflects the sky instead, nearly completely at
+	/// grazing angles when smooth, which turned distant glossy surfaces (bridge decks) into sky-coloured mirrors.
+	/// Use the roughness matching the game's highlight, floored so environment reflections stay faint; materials
+	/// without a specular map have no highlight at all. Chrome and car paint do reflect in the game and stay smoother.
+	/// </summary>
+	static float RoughnessFor( AwMeshFile.MaterialDef def )
+	{
+		float gloss = Math.Clamp( def.Value( "g_fGlossiness", 0.2f ), 0f, 0.98f );
+		if ( def.Shader.StartsWith( "Chrome", StringComparison.OrdinalIgnoreCase ) )
+			return Math.Clamp( 1f - gloss, 0.15f, 1f );
+		if ( def.Shader.StartsWith( "CarPaint", StringComparison.OrdinalIgnoreCase ) )
+			return 0.35f;
+		if ( def.Texture( "g_sSpecularMap" ) is null )
+			return 0.85f;
+
+		float exponent = 3f / (1f - gloss);
+		return Math.Clamp( MathF.Sqrt( 2f / (exponent + 2f) ), 0.55f, 1f );
 	}
 
 	/// <summary>
