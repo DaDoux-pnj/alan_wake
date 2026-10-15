@@ -5,7 +5,7 @@
 		installs it with the shaders it uses into sbox/mount/alan_wake. s&box only loads mount DLLs at startup and keeps
 		them locked, so close s&box, build, then start it again:
 			dotnet build Mount/alan_wake.mount.csproj
-		Pass -p:SboxDir=... if s&box is installed somewhere else.
+		Pass -p:SboxDir=... if s&box is installed somewhere else, or -p:SkipInstall=true to only check that it builds.
 	-->
 
 	<PropertyGroup>
@@ -36,7 +36,7 @@
 		<MountShader Include="../Assets/shaders/aw_*.shader;../Assets/shaders/aw_*.shader_c" />
 	</ItemGroup>
 
-	<Target Name="InstallMount" AfterTargets="Build">
+	<Target Name="InstallMount" AfterTargets="Build" Condition="'$(SkipInstall)' != 'true'">
 		<Copy SourceFiles="$(TargetPath);$(TargetDir)$(TargetName).pdb" DestinationFolder="$(MountDir)" />
 		<Copy SourceFiles="@(MountShader)" DestinationFolder="$(MountDir)/Assets/shaders" />
 		<Message Importance="high" Text="Alan Wake mount installed in $(MountDir), restart s&amp;box to load it." />

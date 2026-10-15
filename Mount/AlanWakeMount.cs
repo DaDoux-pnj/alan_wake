@@ -17,6 +17,7 @@ namespace Sandbox.Mounting;
 ///   worlds/{world}/{level}/terrain_XXX_ZZZ            -> Model     (displaced terrain of one 128 m cell)
 ///   worlds/{world}/{level}/cell_XXX_ZZZ               -> Prefab    (terrain + static meshes of the cell)
 ///   worlds/{world}/{level}/{level}_extras             -> Prefab    (level-wide statics, interiors)
+///   maps/{area}                                       -> Scene     (a playable area with all its parts, see AwMapLoader)
 /// Built as a standalone mount (sbox/mount/alan_wake/alan_wake.dll, see alan_wake.mount.csproj), so it has no
 /// ConVars or console commands: settings come from alan_wake.json (<see cref="AwSettings"/>), and the
 /// "aw_place_level" / "aw_place_world" editor commands live in the alan_wake project's Editor folder, as do the
@@ -290,7 +291,21 @@ public class AlanWakeMount : BaseGameMount
 			extras++;
 		}
 
-		Log.Info( $"Alan Wake: {meshes} meshes, {textures} textures, {CellsByLevel.Sum( x => x.Value.Count )} world cells in {CellsByLevel.Count} levels, {extras} level extras" );
+		// One map per playable area, with every part of it ("brightfalls_part_1" to "_4" make Bright Falls). Areas
+		// without high detail cells are distant scenery the player can't walk on, so they get no map.
+		int maps = 0;
+		foreach ( var area in CellsByLevel.Values.GroupBy( cells => (cells[0].World, Area: AwMapLoader.AreaOf( cells[0].Level )) ) )
+		{
+			var areaCells = area.SelectMany( x => x ).ToList();
+			if ( !areaCells.Any( c => c.HighDetailPath is not null ) )
+				continue;
+
+			var levels = area.Select( x => x[0].Level ).OrderBy( x => x, StringComparer.OrdinalIgnoreCase ).ToList();
+			context.Add( ResourceType.Scene, $"maps/{AwMapLoader.MapName( area.Key.World, area.Key.Area )}", new AwMapLoader( area.Key.World, levels, areaCells ) );
+			maps++;
+		}
+
+		Log.Info( $"Alan Wake: {meshes} meshes, {textures} textures, {CellsByLevel.Sum( x => x.Value.Count )} world cells in {CellsByLevel.Count} levels, {extras} level extras, {maps} maps" );
 
 		IsMounted = true;
 		return Task.CompletedTask;
@@ -343,6 +358,9 @@ sealed class AwCellInfo
 	public string TerrainModelPath => $"mount://alan_wake/{TerrainResourcePath}.vmdl";
 	public string PrefabPath => $"mount://alan_wake/{PrefabResourcePath}.prefab";
 
+	/// <summary>Cell centre in Alan Wake space (metres, height 0).</summary>
+	public Vector3 CenterMetres => AwSpace.CellOriginMetres( X, Z ) + new Vector3( AwSpace.CellSize * 0.5f, 0, AwSpace.CellSize * 0.5f );
+
 	/// <summary>Cell centre in s&amp;box space (height 0).</summary>
-	public Vector3 Center => AwSpace.Position( AwSpace.CellOriginMetres( X, Z ) + new Vector3( AwSpace.CellSize * 0.5f, 0, AwSpace.CellSize * 0.5f ) );
+	public Vector3 Center => AwSpace.Position( CenterMetres );
 }

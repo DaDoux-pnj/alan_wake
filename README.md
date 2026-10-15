@@ -16,5 +16,11 @@ dotnet build Mount/alan_wake.mount.csproj
 
 This builds `alan_wake.dll` and installs it with the shaders into `sbox/mount/alan_wake`; s&box loads it on the next start. If s&box isn't in `E:/SteamLibrary/steamapps/common/sbox`, add `-p:SboxDir=<your sbox folder>`. Rebuild after s&box updates that change the engine API.
 
+## Maps
+The mount turns each playable area into a map, with all of the area's parts: `mount://alan_wake/maps/brightfalls.scene` holds the four Bright Falls parts. The DLC areas are named `dlc1_brightfalls` and `dlc2_cauldronlake`. Each map gets a sun, a sky and a spawn point on open ground near the middle. Areas the player can't walk on (distant scenery only) get no map.
+
+- **In this project:** open `scenes/play.scene` (also the startup scene), set the map on the Map object, and press Play. The Map Spawner puts your player on the map's spawn point once it has loaded.
+- **In other games:** any game that lets you pick a map lists them under Alan Wake. Grass and trees only show in games that include `Code/AwGrassRenderer.cs` and `Code/AwFoliageRenderer.cs`.
+
 ## Settings
 `sbox/mount/alan_wake/alan_wake.json` is written with the defaults the first time the game is mounted. After editing it, toggle the alan_wake mount off and on (or restart s&box) and place the level again.

@@ -168,6 +168,49 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 			.Finish();
 	}
 
+	/// <summary>A poly's vertices at its grid corners (0,0), (1,0), (1,1), (0,1), and the corner records they come from.</summary>
+	static void Corners( AwTerrainFile.Poly p, Span<int> vertex, Span<int> slot )
+	{
+		if ( p.IsTriangle )
+		{
+			// The grid of a triangle has v0 at (0,0), v1 at (15,0), v2 at (15,15); (0,15) collapses onto v0.
+			vertex[0] = p.V0; vertex[1] = p.V0; vertex[2] = p.V2; vertex[3] = p.V1;
+			slot[0] = 0; slot[1] = 0; slot[2] = 2; slot[3] = 1;
+		}
+		else
+		{
+			vertex[0] = p.V0; vertex[1] = p.V1; vertex[2] = p.V2; vertex[3] = p.V3;
+			slot[0] = 0; slot[1] = 1; slot[2] = 2; slot[3] = 3;
+		}
+	}
+
+	/// <summary>
+	/// The displaced 16 x 16 surface grid of one poly (row = t, column = s) in Alan Wake space, the points the mesh
+	/// and its collision are built from; null when the poly's corners are broken.
+	/// </summary>
+	internal static Vector3[] SurfaceGrid( AwTerrainFile t, int poly )
+	{
+		Span<int> vertex = stackalloc int[4];
+		Span<int> slot = stackalloc int[4];
+		Corners( t.Polys[poly], vertex, slot );
+		foreach ( var v in vertex )
+			if ( v < 0 || v >= t.Positions.Length ) return null;
+
+		var heights = t.Heights is not null && poly < t.Heights.Length ? t.Heights[poly] : null;
+		var grid = new Vector3[256];
+		for ( int r = 0; r < 16; r++ )
+		for ( int c = 0; c < 16; c++ )
+		{
+			float s = c / 15f, tt = r / 15f;
+			var pos = Bilinear( t.Positions[vertex[0]], t.Positions[vertex[1]], t.Positions[vertex[2]], t.Positions[vertex[3]], s, tt );
+			if ( heights is not null )
+				pos += Bilinear( t.Normals[vertex[0]], t.Normals[vertex[1]], t.Normals[vertex[2]], t.Normals[vertex[3]], s, tt ) * (heights[r * 16 + c] / 2048f);
+			grid[r * 16 + c] = pos;
+		}
+
+		return grid;
+	}
+
 	static Vector3 Bilinear( Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3, float s, float t )
 	{
 		var a = p0 + (p1 - p0) * s;
@@ -196,17 +239,7 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 		for ( int i = 0; i < t.Polys.Length; i++ )
 		{
 			var p = t.Polys[i];
-			if ( p.IsTriangle )
-			{
-				// The grid of a triangle has v0 at (0,0), v1 at (15,0), v2 at (15,15); (0,15) collapses onto v0.
-				cornerVertex[0] = p.V0; cornerVertex[1] = p.V0; cornerVertex[2] = p.V2; cornerVertex[3] = p.V1;
-				cornerSlot[0] = 0; cornerSlot[1] = 0; cornerSlot[2] = 2; cornerSlot[3] = 1;
-			}
-			else
-			{
-				cornerVertex[0] = p.V0; cornerVertex[1] = p.V1; cornerVertex[2] = p.V2; cornerVertex[3] = p.V3;
-				cornerSlot[0] = 0; cornerSlot[1] = 1; cornerSlot[2] = 2; cornerSlot[3] = 3;
-			}
+			Corners( p, cornerVertex, cornerSlot );
 
 			bool valid = true;
 			for ( int k = 0; k < 4; k++ )
