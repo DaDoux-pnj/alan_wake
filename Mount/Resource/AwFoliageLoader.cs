@@ -36,7 +36,7 @@ sealed class AwFoliageModelLoader( string archivePath, bool impostor ) : Resourc
 				continue;
 
 			var def = sub.MaterialIndex < foliage.Mesh.Materials.Count ? foliage.Mesh.Materials[sub.MaterialIndex] : null;
-			var material = def is null ? Material.Load( "materials/dev/dev_measure.vmat" ) : AwMaterials.ForMesh( Host, def );
+			var material = def is null ? Material.Load( "materials/dev/dev_measure.vmat" ) : AwMaterials.ForFoliage( Host, def );
 			builder.AddMesh( AwModelLoader.BuildMesh( material, sub, out _ ) );
 			meshes++;
 		}

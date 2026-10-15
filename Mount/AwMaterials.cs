@@ -66,6 +66,7 @@ static class AwMaterials
 	const string TerrainShader = "shaders/aw_terrain.shader";
 	const string WaterShader = "shaders/aw_water.shader";
 	const string GrassShader = "shaders/aw_grass.shader";
+	const string FoliageShader = "shaders/aw_foliage.shader";
 
 	static readonly object Lock = new();
 	static readonly Dictionary<string, Material> Materials = new( StringComparer.OrdinalIgnoreCase );
@@ -468,16 +469,51 @@ static class AwMaterials
 				return cached;
 		}
 
-		var material = Material.Create( $"alan_wake/materials/m{System.Threading.Interlocked.Increment( ref _counter )}", ObjectShader, false );
+		var material = Material.Create( $"alan_wake/materials/m{System.Threading.Interlocked.Increment( ref _counter )}", FoliageShader, false );
 		material.Set( "g_tColor", Color( host, atlasPath ) ?? Texture.White );
-		material.Set( "g_tNormal", FlatNormal( 230 ) );
-		material.Set( "g_tAmbientOcclusion", Texture.White );
-		material.Set( "g_flMetalness", 0f );
-		material.Set( "g_flRoughnessScaleFactor", 1.0f );
-		material.Set( "g_vColorTint", new Color( brightness, brightness, brightness, 1f ) );
+		material.Set( "g_tNormal", FlatNormal( 255 ) );
+		material.Set( "g_tRma", Solid( 255, 0, 255, 0 ) ); // fully rough, no metalness, no occlusion
+		material.Set( "g_flTintColor", new Vector3( brightness, brightness, brightness ) );
 		material.SetFeature( "F_ALPHA_TEST", 1 );
 		material.Set( "g_flAlphaTestReference", 0.5f );
 		material.SetFeature( "F_RENDER_BACKFACES", 1 );
+
+		lock ( Lock ) Materials[key] = material;
+		return material;
+	}
+
+	/// <summary>
+	/// A tree's or plant's material (.binfol meshes, the game's FoliagePRT) on shaders/aw_foliage.shader: lit diffusely
+	/// like the game's foliage, which has no specular at all; alpha tested where the texture has alpha, two sided then.
+	/// </summary>
+	public static Material ForFoliage( AlanWakeMount host, AwMeshFile.MaterialDef def )
+	{
+		var colorPath = def.Texture( "g_sColorMap" ) ?? "";
+		var normalPath = def.Texture( "g_sNormalMap" ) ?? "";
+		var tint = def.Vector( "g_vColorMultiplier" );
+		bool cutout = def.AlphaTest || (colorPath.Length > 0 && HasAlpha( host, colorPath ));
+
+		var key = $"foliage|{colorPath}|{normalPath}|{(tint is null ? "" : string.Join( ',', tint ))}|{cutout}|{def.TwoSided}";
+		lock ( Lock )
+		{
+			if ( Materials.TryGetValue( key, out var cached ) )
+				return cached;
+		}
+
+		var material = Material.Create( $"alan_wake/materials/m{System.Threading.Interlocked.Increment( ref _counter )}", FoliageShader, false );
+		material.Set( "g_tColor", Color( host, colorPath ) ?? Texture.White );
+		material.Set( "g_tNormal", Normal( host, normalPath, 1f ) );
+		material.Set( "g_tRma", Solid( 255, 0, 255, 0 ) ); // fully rough, no metalness, no occlusion
+		material.Set( "g_flTintColor", tint is { Length: >= 3 } ? new Vector3( tint[0], tint[1], tint[2] ) : Vector3.One );
+
+		if ( cutout )
+		{
+			material.SetFeature( "F_ALPHA_TEST", 1 );
+			material.Set( "g_flAlphaTestReference", 0.5f );
+		}
+
+		if ( cutout || def.TwoSided )
+			material.SetFeature( "F_RENDER_BACKFACES", 1 );
 
 		lock ( Lock ) Materials[key] = material;
 		return material;
