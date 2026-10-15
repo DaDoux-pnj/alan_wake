@@ -1,7 +1,7 @@
 {
   "Title": "Alan Wake",
   "Type": "game",
-  "Org": "local",
+  "Org": "redsnail",
   "Ident": "alan_wake",
   "Schema": 1,
   "IncludeSourceFiles": false,
@@ -13,7 +13,7 @@
   ],
   "IsStandaloneOnly": false,
   "AI": {
-    "EnableMcpCommunication": true
+    "EnableMcpCommunication": false
   },
   "Metadata": {
     "MaxPlayers": 64,
@@ -28,6 +28,18 @@
     "PerMapRanking": false,
     "LeaderboardType": "None",
     "CsProjName": "",
-    "StartupScene": "scenes/play.scene"
+    "StartupScene": "scenes/play.scene",
+    "RecommendedMinPlayers": 0,
+    "RecommendedMaxPlayers": 0,
+    "Coop": false,
+    "Versus": false,
+    "LaunchMode": "Normal",
+    "MapSettings": {
+      "UseCreateGameModal": true,
+      "NeedsMap": true,
+      "ShowChangeMap": true,
+      "DefaultMap": null,
+      "MapTarget": "redsnail.alan_wake"
+    }
   }
 }
