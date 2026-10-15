@@ -1,0 +1,223 @@
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+namespace Sandbox.Mounting;
+
+[StructLayout( LayoutKind.Sequential )]
+struct AwVertex
+{
+	[VertexLayout.Position] public Vector3 Position;
+	[VertexLayout.Normal] public Vector3 Normal;
+	[VertexLayout.Tangent] public Vector4 Tangent;
+	[VertexLayout.TexCoord( 0 )] public Vector4 TexCoord;
+}
+
+/// <summary>
+/// Terrain vertex for shaders/aw_terrain.shader: TEXCOORD4 = layer0 uv (xy) + layer1 uv (zw),
+/// TEXCOORD5 = layer2 uv (xy) + blend atlas uv (zw). TEXCOORD0/1 repeat layer0/1 for the engine's own use.
+/// </summary>
+[StructLayout( LayoutKind.Sequential )]
+struct AwTerrainVertex
+{
+	[VertexLayout.Position] public Vector3 Position;
+	[VertexLayout.Normal] public Vector3 Normal;
+	[VertexLayout.Tangent] public Vector4 Tangent;
+	[VertexLayout.TexCoord( 0 )] public Vector2 TexCoord0;
+	[VertexLayout.TexCoord( 1 )] public Vector2 TexCoord1;
+	[VertexLayout.TexCoord( 4 )] public Vector4 LayerUv01;
+	[VertexLayout.TexCoord( 5 )] public Vector4 LayerUv2Blend;
+}
+
+/// <summary>
+/// Creates and caches s&amp;box materials/textures for Alan Wake assets. Props use the stock complex shader,
+/// terrain uses shaders/aw_terrain.shader (3 layer height blend, same maths as the game's terrain baker).
+/// </summary>
+static class AwMaterials
+{
+	const string ObjectShader = "shaders/complex.shader";
+	const string TerrainShader = "shaders/aw_terrain.shader";
+
+	static readonly object Lock = new();
+	static readonly Dictionary<string, Material> Materials = new( StringComparer.OrdinalIgnoreCase );
+	static readonly Dictionary<string, Texture> ColorTextures = new( StringComparer.OrdinalIgnoreCase );
+	static readonly Dictionary<string, Texture> NormalTextures = new( StringComparer.OrdinalIgnoreCase );
+	static readonly Dictionary<int, Texture> FlatNormals = new();
+	static int _counter;
+
+	public static void Clear()
+	{
+		lock ( Lock )
+		{
+			Materials.Clear();
+			ColorTextures.Clear();
+			NormalTextures.Clear();
+			FlatNormals.Clear();
+		}
+	}
+
+	/// <summary>Native DXT upload of a game texture (with its own mip chain). Null if missing/unsupported.</summary>
+	public static Texture Color( AlanWakeMount host, string path )
+	{
+		path = AwArchive.NormalizePath( path );
+		if ( string.IsNullOrEmpty( path ) ) return null;
+
+		lock ( Lock )
+		{
+			if ( ColorTextures.TryGetValue( path, out var cached ) )
+				return cached;
+		}
+
+		Texture texture = null;
+		try
+		{
+			var bytes = host.Archive.TryRead( path );
+			if ( bytes is not null )
+				texture = TextureLoader.FromDds( AwTextureFile.ToDds( bytes ) );
+		}
+		catch ( Exception ex )
+		{
+			if ( AlanWakeMount.DebugLog ) Log.Warning( $"[AW] texture '{path}': {ex.Message}" );
+		}
+
+		lock ( Lock ) ColorTextures[path] = texture;
+		return texture;
+	}
+
+	/// <summary>
+	/// Game normal maps are DXT5nm (X in alpha, Y in green). Decode them into a regular RGB normal map with
+	/// roughness in alpha, which is what the complex shader samples from g_tNormal.
+	/// </summary>
+	public static Texture Normal( AlanWakeMount host, string path, float roughness )
+	{
+		path = AwArchive.NormalizePath( path );
+		byte r = (byte)Math.Clamp( roughness * 255f, 0, 255 );
+		if ( string.IsNullOrEmpty( path ) || !AlanWakeMount.NormalMaps )
+			return FlatNormal( r );
+
+		var key = $"{path}|{r / 16}";
+		lock ( Lock )
+		{
+			if ( NormalTextures.TryGetValue( key, out var cached ) )
+				return cached ?? FlatNormal( r );
+		}
+
+		Texture texture = null;
+		try
+		{
+			var bytes = host.Archive.TryRead( path );
+			if ( bytes is not null )
+			{
+				var header = AwTextureFile.ReadHeader( bytes );
+				var rgba = AwTextureFile.DecodeRgba( bytes, AlanWakeMount.NormalMapMaxSize, out int w, out int h );
+				bool swizzled = AwTextureFile.IsDxt5( header.Format );
+				bool flipGreen = AlanWakeMount.NormalMapFlipGreen;
+				for ( int i = 0; i < w * h; i++ )
+				{
+					int o = i * 4;
+					float x = (swizzled ? rgba[o + 3] : rgba[o]) / 255f * 2f - 1f;
+					float y = rgba[o + 1] / 255f * 2f - 1f;
+					if ( flipGreen ) y = -y;
+					float z = MathF.Sqrt( MathF.Max( 0f, 1f - x * x - y * y ) );
+					rgba[o + 0] = (byte)Math.Clamp( (x * 0.5f + 0.5f) * 255f, 0, 255 );
+					rgba[o + 1] = (byte)Math.Clamp( (y * 0.5f + 0.5f) * 255f, 0, 255 );
+					rgba[o + 2] = (byte)Math.Clamp( (z * 0.5f + 0.5f) * 255f, 0, 255 );
+					rgba[o + 3] = r;
+				}
+
+				texture = Texture.Create( w, h, ImageFormat.RGBA8888 )
+					.WithData( rgba )
+					.WithMips()
+					.WithStaticUsage()
+					.Finish();
+			}
+		}
+		catch ( Exception ex )
+		{
+			if ( AlanWakeMount.DebugLog ) Log.Warning( $"[AW] normal map '{path}': {ex.Message}" );
+		}
+
+		lock ( Lock ) NormalTextures[key] = texture;
+		return texture ?? FlatNormal( r );
+	}
+
+	static Texture FlatNormal( byte roughness )
+	{
+		int key = roughness / 16;
+		lock ( Lock )
+		{
+			if ( FlatNormals.TryGetValue( key, out var t ) )
+				return t;
+			t = Texture.Create( 1, 1 ).WithData( new byte[] { 128, 128, 255, (byte)(key * 16 + 8) } ).Finish();
+			FlatNormals[key] = t;
+			return t;
+		}
+	}
+
+	public static Material ForMesh( AlanWakeMount host, AwMeshFile.MaterialDef def )
+	{
+		var colorPath = def.Texture( "g_sColorMap" ) ?? def.Texture( "g_sVideoMap" ) ?? "";
+		var normalPath = def.Texture( "g_sNormalMap" ) ?? "";
+		var tint = def.Vector( "g_vColorMultiplier" );
+		float gloss = def.Value( "g_fGlossiness", 0.2f );
+		bool glass = def.Shader.StartsWith( "Glass", StringComparison.OrdinalIgnoreCase );
+
+		var key = $"{def.Shader}|{def.Flags}|{def.Blend}|{def.Cull}|{colorPath}|{normalPath}|{(tint is null ? "" : string.Join( ',', tint ))}|{gloss:0.00}";
+		lock ( Lock )
+		{
+			if ( Materials.TryGetValue( key, out var cached ) )
+				return cached;
+		}
+
+		var material = Material.Create( $"alan_wake/materials/m{System.Threading.Interlocked.Increment( ref _counter )}", ObjectShader, false );
+
+		var color = Color( host, colorPath );
+		material.Set( "g_tColor", color ?? Texture.White );
+
+		float roughness = Math.Clamp( 1f - gloss, 0.15f, 1f );
+		material.Set( "g_tNormal", Normal( host, normalPath, roughness ) );
+		material.Set( "g_tAmbientOcclusion", Texture.White );
+		material.Set( "g_flMetalness", def.Shader.StartsWith( "Chrome", StringComparison.OrdinalIgnoreCase ) ? 0.5f : 0f );
+		material.Set( "g_flRoughnessScaleFactor", 1.0f );
+
+		var c = tint is { Length: >= 3 } ? new Color( tint[0], tint[1], tint[2], tint.Length > 3 ? tint[3] : 1f ) : global::Color.White;
+		if ( glass )
+			c = new Color( 0.75f, 0.8f, 0.85f, 0.35f );
+		material.Set( "g_vColorTint", c );
+
+		if ( def.AlphaTest )
+		{
+			material.SetFeature( "F_ALPHA_TEST", 1 );
+			material.Set( "g_flAlphaTestReference", 0.5f );
+		}
+		else if ( def.Translucent || glass )
+		{
+			material.SetFeature( "F_TRANSLUCENT", 1 );
+		}
+
+		if ( def.TwoSided || def.AlphaTest )
+			material.SetFeature( "F_RENDER_BACKFACES", 1 );
+
+		lock ( Lock ) Materials[key] = material;
+		return material;
+	}
+
+	public static Material ForTerrain( AlanWakeMount host, string layer0, string layer1, string layer2, Texture blendAtlas, string key )
+	{
+		lock ( Lock )
+		{
+			if ( Materials.TryGetValue( key, out var cached ) )
+				return cached;
+		}
+
+		var material = Material.Create( $"alan_wake/terrain/t{System.Threading.Interlocked.Increment( ref _counter )}", TerrainShader, false );
+		material.Set( "g_tLayer0", Color( host, layer0 ) ?? Texture.White );
+		material.Set( "g_tLayer1", Color( host, layer1 ) ?? Texture.White );
+		material.Set( "g_tLayer2", Color( host, layer2 ) ?? Texture.White );
+		material.Set( "g_tBlend", blendAtlas );
+		material.Set( "g_flBrightness", AlanWakeMount.TerrainBrightness );
+
+		lock ( Lock ) Materials[key] = material;
+		return material;
+	}
+}

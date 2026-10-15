@@ -1,0 +1,151 @@
+using System;
+using System.Collections.Generic;
+
+namespace Sandbox.Mounting;
+
+/// <summary>Builds an s&amp;box model from one .binmsh (LOD0 + the game's LOD1 when present).</summary>
+sealed class AwModelLoader( string archivePath ) : ResourceLoader<AlanWakeMount>
+{
+	protected override object Load()
+	{
+		try
+		{
+			var file = AwMeshFile.Parse( Host.Archive.Read( archivePath ) );
+			var builder = Model.Builder.WithName( Path );
+
+			bool hasLod1 = file.LodCount > 1;
+			var collisionPositions = new List<Vector3>();
+			var collisionIndices = new List<int>();
+			var bounds = new BBox( Vector3.Zero, Vector3.Zero );
+			bool boundsSet = false;
+			int meshCount = 0;
+
+			foreach ( var sub in file.SubMeshes )
+			{
+				if ( sub.Positions.Length == 0 || sub.Indices.Length == 0 )
+					continue;
+				if ( sub.Lod > 1 )
+					continue;
+
+				var def = sub.MaterialIndex < file.Materials.Count ? file.Materials[sub.MaterialIndex] : null;
+				var material = def is null ? Material.Load( "materials/dev/dev_measure.vmat" ) : AwMaterials.ForMesh( Host, def );
+				var mesh = BuildMesh( material, sub, out var subBounds );
+
+				if ( hasLod1 ) builder.AddMesh( mesh, sub.Lod );
+				else builder.AddMesh( mesh );
+				meshCount++;
+
+				if ( sub.Lod == 0 )
+				{
+					bounds = boundsSet ? bounds.AddBBox( subBounds ) : subBounds;
+					boundsSet = true;
+
+					bool solid = def is null || !(def.Translucent || def.Shader.StartsWith( "Glass", StringComparison.OrdinalIgnoreCase ) || def.Shader.StartsWith( "Water", StringComparison.OrdinalIgnoreCase ));
+					if ( solid && AlanWakeMount.Collision )
+					{
+						int baseIndex = collisionPositions.Count;
+						collisionPositions.AddRange( sub.Positions );
+						foreach ( var i in sub.Indices ) collisionIndices.Add( baseIndex + i );
+					}
+				}
+			}
+
+			if ( meshCount == 0 )
+				return null;
+
+			if ( hasLod1 )
+			{
+				// Bigger props keep their full detail mesh for longer.
+				float size = boundsSet ? bounds.Size.Length : 0;
+				builder.WithLodDistance( 0, 0 );
+				builder.WithLodDistance( 1, MathF.Max( AlanWakeMount.MeshLodDistance, size * 6f ) );
+				for ( int lod = 2; lod < 8; lod++ )
+					builder.WithLodDistance( lod, 1_000_000f );
+			}
+
+			if ( collisionIndices.Count > 0 )
+				builder.AddCollisionMesh( collisionPositions, collisionIndices );
+
+			return builder.Create();
+		}
+		catch ( Exception ex )
+		{
+			Log.Warning( $"[AW] mesh '{archivePath}' failed: {ex.Message}" );
+			return null;
+		}
+	}
+
+	internal static Mesh BuildMesh( Material material, AwMeshFile.SubMesh sub, out BBox bounds )
+	{
+		int n = sub.Positions.Length;
+		var tangents = new Vector3[n];
+		var bitangents = new Vector3[n];
+		var idx = sub.Indices;
+
+		for ( int t = 0; t + 2 < idx.Length; t += 3 )
+		{
+			int a = idx[t], b = idx[t + 1], c = idx[t + 2];
+			if ( a >= n || b >= n || c >= n ) continue;
+			var e1 = sub.Positions[b] - sub.Positions[a];
+			var e2 = sub.Positions[c] - sub.Positions[a];
+			var d1 = sub.Uv0[b] - sub.Uv0[a];
+			var d2 = sub.Uv0[c] - sub.Uv0[a];
+			float det = d1.x * d2.y - d2.x * d1.y;
+			if ( MathF.Abs( det ) < 1e-12f ) continue;
+			float r = 1f / det;
+			var tan = (e1 * d2.y - e2 * d1.y) * r;
+			var bit = (e2 * d1.x - e1 * d2.x) * r;
+			tangents[a] += tan; tangents[b] += tan; tangents[c] += tan;
+			bitangents[a] += bit; bitangents[b] += bit; bitangents[c] += bit;
+		}
+
+		var verts = new List<AwVertex>( n );
+		var min = new Vector3( float.MaxValue );
+		var max = new Vector3( float.MinValue );
+		for ( int i = 0; i < n; i++ )
+		{
+			var normal = sub.Normals[i];
+			var tangent = tangents[i] - normal * Vector3.Dot( normal, tangents[i] );
+			if ( tangent.LengthSquared < 1e-12f )
+				tangent = MathF.Abs( normal.z ) < 0.9f ? Vector3.Cross( Vector3.Up, normal ) : Vector3.Cross( Vector3.Forward, normal );
+			tangent = tangent.Normal;
+			float sign = Vector3.Dot( Vector3.Cross( normal, tangent ), bitangents[i] ) < 0 ? -1f : 1f;
+
+			var p = sub.Positions[i];
+			min = Vector3.Min( min, p );
+			max = Vector3.Max( max, p );
+
+			verts.Add( new AwVertex
+			{
+				Position = p,
+				Normal = normal,
+				Tangent = new Vector4( tangent, sign ),
+				TexCoord = new Vector4( sub.Uv0[i].x, sub.Uv0[i].y, 0, 0 ),
+			} );
+		}
+
+		bounds = new BBox( min, max );
+		var mesh = new Mesh( material, MeshPrimitiveType.Triangles );
+		mesh.CreateVertexBuffer( verts.Count, verts );
+		mesh.CreateIndexBuffer( idx.Length, new List<int>( idx ) );
+		mesh.Bounds = bounds;
+		return mesh;
+	}
+}
+
+/// <summary>Exposes game textures in the asset browser.</summary>
+sealed class AwTextureLoader( string archivePath ) : ResourceLoader<AlanWakeMount>
+{
+	protected override object Load()
+	{
+		try
+		{
+			return TextureLoader.FromDds( AwTextureFile.ToDds( Host.Archive.Read( archivePath ) ) );
+		}
+		catch ( Exception ex )
+		{
+			Log.Warning( $"[AW] texture '{archivePath}' failed: {ex.Message}" );
+			return null;
+		}
+	}
+}
