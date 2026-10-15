@@ -108,6 +108,49 @@ public class AlanWakeMount : BaseGameMount
 	[ConVar( "aw_foliage_undergrowth_shadows", ConVarFlags.Saved )]
 	public static bool UndergrowthShadows { get; set; } = false;
 
+	[ConVar( "aw_grass", ConVarFlags.Saved )]
+	public static bool Grass { get; set; } = true;
+
+	/// <summary>Metres. Grass grows around the camera up to this distance (the game uses 15 to 25).</summary>
+	[ConVar( "aw_grass_distance", ConVarFlags.Saved )]
+	public static float GrassDistance { get; set; } = 100;
+
+	/// <summary>Multiplier on the game's grass density.</summary>
+	[ConVar( "aw_grass_density", ConVarFlags.Saved )]
+	public static float GrassDensity { get; set; } = 1;
+
+	internal const string GrassPath = "grass/grass.bingrs";
+
+	internal static string GrassClumpModelPath( int index ) => $"mount://alan_wake/grass/clump_{index:D2}.vmdl";
+
+	readonly object _grassLock = new();
+	AwGrassFile _grass;
+	bool _grassLoaded;
+
+	/// <summary>The game's grass clumps (cached), or null if missing/broken.</summary>
+	internal AwGrassFile GetGrass()
+	{
+		lock ( _grassLock )
+		{
+			if ( _grassLoaded )
+				return _grass;
+			_grassLoaded = true;
+
+			try
+			{
+				var bytes = Archive.TryRead( GrassPath );
+				if ( bytes is not null )
+					_grass = AwGrassFile.Parse( bytes );
+			}
+			catch ( Exception ex )
+			{
+				Log.Warning( $"[AW] grass: {ex.Message}" );
+			}
+
+			return _grass;
+		}
+	}
+
 	readonly Dictionary<string, AwFoliageFile> _foliage = new( StringComparer.OrdinalIgnoreCase );
 
 	/// <summary>Parsed foliage type (cached), or null if missing/broken.</summary>
@@ -189,6 +232,15 @@ public class AlanWakeMount : BaseGameMount
 				continue;
 			}
 
+			if ( path == GrassPath )
+			{
+				var header = Archive.ReadPrefix( path, 8 );
+				int clumps = header is { Length: >= 8 } ? Math.Clamp( BitConverter.ToInt32( header, 4 ), 0, 64 ) : 0;
+				for ( int i = 0; i < clumps; i++ )
+					context.Add( ResourceType.Model, $"grass/clump_{i:D2}", new AwGrassClumpLoader( i ) );
+				continue;
+			}
+
 			if ( !path.StartsWith( "worlds/", StringComparison.Ordinal ) || !path.EndsWith( ".bin", StringComparison.Ordinal ) )
 				continue;
 
@@ -247,6 +299,11 @@ public class AlanWakeMount : BaseGameMount
 		AwMaterials.Clear();
 		CellsByLevel.Clear();
 		lock ( _foliage ) _foliage.Clear();
+		lock ( _grassLock )
+		{
+			_grass = null;
+			_grassLoaded = false;
+		}
 		Archive?.Dispose();
 		Archive = null;
 		if ( Current == this ) Current = null;

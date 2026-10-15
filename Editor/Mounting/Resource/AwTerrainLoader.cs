@@ -49,7 +49,7 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 			// Background cells (low detail only) have no height grids: subdividing them adds nothing, and nobody
 			// can walk on them, so they get flat quads and no collision.
 			bool detailed = terrain.Heights is not null;
-			int subdivisions = !detailed ? 1 : AlanWakeMount.TerrainSubdivisions switch { >= 15 => 15, >= 5 => 5, >= 3 => 3, _ => 1 };
+			int subdivisions = SubdivisionsFor( detailed );
 			bool useLod = AlanWakeMount.TerrainLodDistance > 0 && subdivisions > 1;
 			bool collide = AlanWakeMount.Collision && detailed;
 
@@ -110,6 +110,10 @@ sealed class AwTerrainLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
 			return null;
 		}
 	}
+
+	/// <summary>Grid segments per terrain poly edge (the grass renderer stands on the same surface).</summary>
+	internal static int SubdivisionsFor( bool detailed )
+		=> !detailed ? 1 : AlanWakeMount.TerrainSubdivisions switch { >= 15 => 15, >= 5 => 5, >= 3 => 3, _ => 1 };
 
 	static Mesh CreateMesh( Material material, Batch batch )
 	{

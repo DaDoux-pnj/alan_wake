@@ -52,6 +52,9 @@ sealed class AwCellPrefabLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMoun
 					if ( hd is not null )
 						AwStaticPlacer.AddFoliage( Host, root, hd, "undergrowth", undergrowth: true );
 				}
+
+				if ( AlanWakeMount.Grass && hd is not null && ld is not null )
+					AwStaticPlacer.AddGrass( Host, root, ld, hd );
 			}
 
 			_prefab = builder.Create();
@@ -309,6 +312,46 @@ static class AwStaticPlacer
 		}
 
 		return added;
+	}
+
+	/// <summary>
+	/// Adds an <see cref="AwGrassRenderer"/> carrying the cell's grass layout (from the high detail terrain data); the
+	/// renderer grows the clumps around the camera at runtime.
+	/// </summary>
+	public static int AddGrass( AlanWakeMount host, GameObject parent, Dictionary<string, byte[]> ld, Dictionary<string, byte[]> hd )
+	{
+		if ( !ld.TryGetValue( "cid_terraindata.bin", out var ldTerrain ) || !hd.TryGetValue( "cid_terraindata.bin", out var hdTerrain ) )
+			return 0;
+
+		var grass = host.GetGrass();
+		if ( grass is null || grass.Clumps.Count == 0 )
+			return 0;
+
+		string data;
+		int polys;
+		try
+		{
+			var terrain = AwTerrainFile.ReadLowDetail( ldTerrain );
+			terrain.ReadHighDetail( hdTerrain );
+			data = AwGrassData.Build( terrain, out polys );
+		}
+		catch ( Exception ex )
+		{
+			Log.Warning( $"[AW] grass: {ex.Message}" );
+			return 0;
+		}
+
+		if ( data is null )
+			return 0;
+
+		var go = new GameObject { Name = "grass", Parent = parent };
+		var renderer = go.AddComponent<AwGrassRenderer>();
+		renderer.Clumps = Enumerable.Range( 0, grass.Clumps.Count ).Select( i => Model.Load( AlanWakeMount.GrassClumpModelPath( i ) ) ).ToList();
+		renderer.Data = data;
+		renderer.Subdivisions = AwTerrainLoader.SubdivisionsFor( true );
+		renderer.MaxDistance = AlanWakeMount.GrassDistance * AwSpace.Scale;
+		renderer.Density = AlanWakeMount.GrassDensity;
+		return polys;
 	}
 
 	/// <summary>

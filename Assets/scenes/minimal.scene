@@ -154,7 +154,7 @@
           "ExposureMethod": "RGB",
           "MaximumExposure": 2,
           "MinimumExposure": 1,
-          "Mode": "HableFilmic",
+          "Mode": "AgX",
           "OnComponentDestroy": null,
           "OnComponentDisabled": null,
           "OnComponentEnabled": null,
@@ -200,7 +200,7 @@
           "__enabled": true,
           "Flags": 0,
           "Blend": 1,
-          "Brightness": 0.9,
+          "Brightness": 1,
           "Contrast": 1.005,
           "HueRotate": 0,
           "OnComponentDestroy": null,
@@ -209,7 +209,120 @@
           "OnComponentFixedUpdate": null,
           "OnComponentStart": null,
           "OnComponentUpdate": null,
-          "Saturation": 1
+          "Saturation": 0.8
+        },
+        {
+          "__type": "Sandbox.ColorGrading",
+          "__guid": "973439c8-2d2f-4aa6-92ce-d8448c8314ee",
+          "__enabled": true,
+          "Flags": 0,
+          "BlendFactor": 1,
+          "BlueCurve": [
+            {
+              "x": 0,
+              "y": 0.5,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            },
+            {
+              "x": 1,
+              "y": 1,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            }
+          ],
+          "ColorSpace": "None",
+          "ColorTempK": 5700,
+          "GradingMethod": "TemperatureControl",
+          "GreenCurve": [
+            {
+              "x": 0,
+              "y": 0.5,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            },
+            {
+              "x": 1,
+              "y": 1,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            }
+          ],
+          "HueCurve": [
+            {
+              "x": 0,
+              "y": 0.5,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            },
+            {
+              "x": 1,
+              "y": 1,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            }
+          ],
+          "LookupTexture": null,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "RedCurve": [
+            {
+              "x": 0,
+              "y": 0.5,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            },
+            {
+              "x": 1,
+              "y": 1,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            }
+          ],
+          "SaturationCurve": [
+            {
+              "x": 0,
+              "y": 0.5,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            },
+            {
+              "x": 1,
+              "y": 1,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            }
+          ],
+          "ValueCurve": [
+            {
+              "x": 0,
+              "y": 0.5,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            },
+            {
+              "x": 1,
+              "y": 1,
+              "in": 0,
+              "out": 0,
+              "mode": "Mirrored"
+            }
+          ]
         }
       ],
       "Children": []
@@ -489,7 +602,7 @@
           ],
           "Children": [
             {
-              "__guid": "30118f3f-b624-4f68-bd5b-afc26cb5cfc1",
+              "__guid": "ea1feb46-b81d-4ffe-b816-b3240e97c579",
               "__version": 2,
               "Flags": 0,
               "Name": "Clothing - y_front_pants_white",
@@ -506,7 +619,7 @@
               "Components": [
                 {
                   "__type": "Sandbox.SkinnedModelRenderer",
-                  "__guid": "9b7b5ce0-cb2e-4749-a804-1fa604ab2079",
+                  "__guid": "b2178c15-30dc-4a1e-aa98-6bb75e467446",
                   "__enabled": true,
                   "Flags": 0,
                   "AnimationGraph": null,

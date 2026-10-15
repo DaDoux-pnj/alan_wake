@@ -18,7 +18,8 @@ namespace Sandbox.Mounting;
 ///
 /// High detail (HD cell, flag 1) adds per poly displacement and finer maps for the same polys:
 ///   u32 25, u8 1, u32 polyCount, grids{ u32 index, s16[16*16], s32 min, max, mean },
-///   u32 count, count x 80 bytes, normal maps, blend maps (16 x 16).
+///   u32 count, grass{ u32 polyIndex, u8 layerCodes[64], u8 clumps[3][2], u8 densities[3][2] } (see AwGrassFile),
+///   normal maps, blend maps (16 x 16).
 ///
 /// A map set is u32 count, count x { u32 polyIndex, u32 dim, u16[dim*dim] } (row = t, column = s), with
 /// X1R5G5B5 samples: R = bits 10-14, G = bits 5-9, B = bits 0-4.
@@ -90,6 +91,9 @@ sealed class AwTerrainFile
 	public short[][] Heights;
 	public PolyMaps HdNormalMaps;
 	public PolyMaps HdBlend;
+
+	/// <summary>Per poly (null where none): 16 x 16 2 bit terrain layer codes, then clump and density x16 per layer slot.</summary>
+	public byte[][] GrassBlocks;
 
 	public static AwTerrainFile ReadLowDetail( byte[] b )
 	{
@@ -183,8 +187,16 @@ sealed class AwTerrainFile
 			p += 4 + 512 + 12;
 		}
 
-		int extra = (int)U32( b, ref p );
-		p += extra * 80;
+		int grassCount = (int)U32( b, ref p );
+		GrassBlocks = new byte[count][];
+		for ( int i = 0; i < grassCount && p + i * 80 + 80 <= b.Length; i++ )
+		{
+			int o = p + i * 80;
+			int poly = BitConverter.ToInt32( b, o );
+			if ( poly >= 0 && poly < count )
+				GrassBlocks[poly] = b.AsSpan( o + 4, 76 ).ToArray();
+		}
+		p += grassCount * 80;
 
 		try
 		{

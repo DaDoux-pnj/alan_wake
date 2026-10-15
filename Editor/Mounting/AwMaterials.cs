@@ -426,6 +426,31 @@ static class AwMaterials
 		return material;
 	}
 
+	/// <summary>Alpha-tested, two sided material for the game's grass clumps (one atlas for all of them).</summary>
+	public static Material ForGrass( AlanWakeMount host, string atlasPath )
+	{
+		var key = $"grass|{atlasPath}";
+		lock ( Lock )
+		{
+			if ( Materials.TryGetValue( key, out var cached ) )
+				return cached;
+		}
+
+		var material = Material.Create( $"alan_wake/materials/m{System.Threading.Interlocked.Increment( ref _counter )}", ObjectShader, false );
+		material.Set( "g_tColor", Color( host, atlasPath ) ?? Texture.White );
+		material.Set( "g_tNormal", FlatNormal( 240 ) );
+		material.Set( "g_tAmbientOcclusion", Texture.White );
+		material.Set( "g_flMetalness", 0f );
+		material.Set( "g_flRoughnessScaleFactor", 1.0f );
+		material.Set( "g_vColorTint", global::Color.White );
+		material.SetFeature( "F_ALPHA_TEST", 1 );
+		material.Set( "g_flAlphaTestReference", 0.5f );
+		material.SetFeature( "F_RENDER_BACKFACES", 1 );
+
+		lock ( Lock ) Materials[key] = material;
+		return material;
+	}
+
 	/// <summary>True when the game texture is stored with an alpha channel (DXT5 or 32 bit).</summary>
 	static bool HasAlpha( AlanWakeMount host, string path )
 	{
