@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+		The Alan Wake mount as a standalone s&box mount, like the built-in ones in sbox/mount: builds alan_wake.dll and
+		installs it with the shaders it uses into sbox/mount/alan_wake. s&box only loads mount DLLs at startup and keeps
+		them locked, so close s&box, build, then start it again:
+			dotnet build Mount/alan_wake.mount.csproj
+		Pass -p:SboxDir=... if s&box is installed somewhere else.
+	-->
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<AssemblyName>alan_wake</AssemblyName>
+		<RootNamespace>Sandbox.Mounting</RootNamespace>
+		<LangVersion>14</LangVersion>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+		<Nullable>disable</Nullable>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<Optimize>true</Optimize>
+		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+		<NoWarn>1701;1702;1591</NoWarn>
+		<SboxDir Condition="'$(SboxDir)' == ''">E:/SteamLibrary/steamapps/common/sbox</SboxDir>
+		<MountDir>$(SboxDir)/mount/alan_wake</MountDir>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Reference Include="$(SboxDir)/bin/managed/Sandbox.System.dll" Private="false" />
+		<Reference Include="$(SboxDir)/bin/managed/Sandbox.Engine.dll" Private="false" />
+		<Reference Include="$(SboxDir)/bin/managed/Sandbox.Filesystem.dll" Private="false" />
+		<Reference Include="$(SboxDir)/bin/managed/Sandbox.Reflection.dll" Private="false" />
+		<Reference Include="$(SboxDir)/bin/managed/Sandbox.Mounting.dll" Private="false" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- The project's shaders (compiled by s&box when edited) ship next to the DLL, like the built-in mounts' -->
+		<MountShader Include="../Assets/shaders/aw_*.shader;../Assets/shaders/aw_*.shader_c" />
+	</ItemGroup>
+
+	<Target Name="InstallMount" AfterTargets="Build">
+		<Copy SourceFiles="$(TargetPath);$(TargetDir)$(TargetName).pdb" DestinationFolder="$(MountDir)" />
+		<Copy SourceFiles="@(MountShader)" DestinationFolder="$(MountDir)/Assets/shaders" />
+		<Message Importance="high" Text="Alan Wake mount installed in $(MountDir), restart s&amp;box to load it." />
+	</Target>
+
+</Project>

@@ -602,7 +602,7 @@
           ],
           "Children": [
             {
-              "__guid": "ea1feb46-b81d-4ffe-b816-b3240e97c579",
+              "__guid": "ffebd9e2-2e55-4b67-bb2a-cece007ed0fb",
               "__version": 2,
               "Flags": 0,
               "Name": "Clothing - y_front_pants_white",
@@ -619,7 +619,7 @@
               "Components": [
                 {
                   "__type": "Sandbox.SkinnedModelRenderer",
-                  "__guid": "b2178c15-30dc-4a1e-aa98-6bb75e467446",
+                  "__guid": "c4d6fbea-5131-4215-b060-bae7fbbc9a05",
                   "__enabled": true,
                   "Flags": 0,
                   "AnimationGraph": null,

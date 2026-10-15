@@ -6,6 +6,7 @@
 .vs/*
 .vscode/*
 *.csproj
+!Mount/*.csproj
 obj
 bin
 Properties/*

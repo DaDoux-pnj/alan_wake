@@ -315,11 +315,15 @@ static class AwStaticPlacer
 	}
 
 	/// <summary>
-	/// Adds an <see cref="AwGrassRenderer"/> carrying the cell's grass layout (from the high detail terrain data); the
+	/// Adds an <c>AwGrassRenderer</c> carrying the cell's grass layout (from the high detail terrain data); the
 	/// renderer grows the clumps around the camera at runtime.
 	/// </summary>
 	public static int AddGrass( AlanWakeMount host, GameObject parent, Dictionary<string, byte[]> ld, Dictionary<string, byte[]> hd )
 	{
+		var rendererType = GameComponent( "AwGrassRenderer" );
+		if ( rendererType is null )
+			return 0;
+
 		if ( !ld.TryGetValue( "cid_terraindata.bin", out var ldTerrain ) || !hd.TryGetValue( "cid_terraindata.bin", out var hdTerrain ) )
 			return 0;
 
@@ -345,20 +349,24 @@ static class AwStaticPlacer
 			return 0;
 
 		var go = new GameObject { Name = "grass", Parent = parent };
-		var renderer = go.AddComponent<AwGrassRenderer>();
-		renderer.Clumps = Enumerable.Range( 0, grass.Clumps.Count ).Select( i => Model.Load( AlanWakeMount.GrassClumpModelPath( i ) ) ).ToList();
-		renderer.Data = data;
-		renderer.Subdivisions = AwTerrainLoader.SubdivisionsFor( true );
-		renderer.MaxDistance = AlanWakeMount.GrassDistance * AwSpace.Scale;
-		renderer.Density = AlanWakeMount.GrassDensity;
+		var renderer = go.Components.Create( rendererType );
+		Set( renderer, "Clumps", Enumerable.Range( 0, grass.Clumps.Count ).Select( i => Model.Load( AlanWakeMount.GrassClumpModelPath( i ) ) ).ToList() );
+		Set( renderer, "Data", data );
+		Set( renderer, "Subdivisions", AwTerrainLoader.SubdivisionsFor( true ) );
+		Set( renderer, "MaxDistance", AlanWakeMount.GrassDistance * AwSpace.Scale );
+		Set( renderer, "Density", AlanWakeMount.GrassDensity );
 		return polys;
 	}
 
 	/// <summary>
-	/// Adds one <see cref="AwFoliageRenderer"/> per foliage type found in a cell container's cid_foliagedata.bin.
+	/// Adds one <c>AwFoliageRenderer</c> per foliage type found in a cell container's cid_foliagedata.bin.
 	/// </summary>
 	public static int AddFoliage( AlanWakeMount host, GameObject parent, Dictionary<string, byte[]> blobs, string groupName, bool undergrowth )
 	{
+		var rendererType = GameComponent( "AwFoliageRenderer" );
+		if ( rendererType is null )
+			return 0;
+
 		if ( !blobs.TryGetValue( "cid_foliagedata.bin", out var data ) )
 			return 0;
 
@@ -411,20 +419,57 @@ static class AwStaticPlacer
 				if ( impostor is not null && impostor.IsError ) impostor = null;
 			}
 
-			var go = new GameObject { Name = name, Parent = group };
-			var renderer = go.AddComponent<AwFoliageRenderer>();
-			renderer.Model = model;
-			renderer.Impostor = impostor;
-			renderer.MeshDistance = meshDistance * AwSpace.Scale;
-			renderer.MaxDistance = maxDistance * AwSpace.Scale;
-			renderer.CastShadows = !undergrowth || AlanWakeMount.UndergrowthShadows;
-			renderer.Instances = byType
+			var transforms = byType
 				.Select( x => new Transform( AwSpace.Position( x.Position ), Rotation.FromYaw( -x.Yaw * (360f / 256f) ) ) )
 				.ToList();
-			added += renderer.Instances.Count;
+
+			var go = new GameObject { Name = name, Parent = group };
+			var renderer = go.Components.Create( rendererType );
+			Set( renderer, "Model", model );
+			Set( renderer, "Impostor", impostor );
+			Set( renderer, "MeshDistance", meshDistance * AwSpace.Scale );
+			Set( renderer, "MaxDistance", maxDistance * AwSpace.Scale );
+			Set( renderer, "CastShadows", !undergrowth || AlanWakeMount.UndergrowthShadows );
+			Set( renderer, "Instances", transforms );
+			added += transforms.Count;
 		}
 
 		return added;
+	}
+
+	static readonly HashSet<string> MissingComponents = new();
+
+	/// <summary>
+	/// A component type from the running game's code, by class name. The grass and foliage renderers can't live in
+	/// this DLL: prefabs only keep components the game's type library knows (engine and game code, never mount DLLs).
+	/// Null, with one warning, when the game doesn't have it.
+	/// </summary>
+	static TypeDescription GameComponent( string name )
+	{
+		var type = Game.TypeLibrary?.GetType( typeof( Component ), name );
+		if ( type is null )
+		{
+			lock ( MissingComponents )
+			{
+				if ( MissingComponents.Add( name ) )
+					Log.Warning( $"[AW] this game has no {name} component, cells load without it (copy Code/{name}.cs from the alan_wake project into the game to get it)" );
+			}
+		}
+
+		return type;
+	}
+
+	/// <summary>Sets a property of a component created from <see cref="GameComponent"/>, whose type isn't known here.</summary>
+	static void Set( Component component, string property, object value )
+	{
+		var info = component.GetType().GetProperty( property );
+		if ( info is null || !info.CanWrite )
+		{
+			Log.Warning( $"[AW] {component.GetType().Name} has no settable {property} property" );
+			return;
+		}
+
+		info.SetValue( component, value );
 	}
 
 	static List<AwStaticObject> ReadObjects( Dictionary<string, byte[]> blobs, string name, int recordSize )

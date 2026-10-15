@@ -17,7 +17,10 @@ namespace Sandbox.Mounting;
 ///   worlds/{world}/{level}/terrain_XXX_ZZZ            -> Model     (displaced terrain of one 128 m cell)
 ///   worlds/{world}/{level}/cell_XXX_ZZZ               -> Prefab    (terrain + static meshes of the cell)
 ///   worlds/{world}/{level}/{level}_extras             -> Prefab    (level-wide statics, interiors)
-/// Use the "aw_place_level" / "aw_place_world" console commands (editor) to drop whole areas in a scene.
+/// Built as a standalone mount (sbox/mount/alan_wake/alan_wake.dll, see alan_wake.mount.csproj), so it has no
+/// ConVars or console commands: settings come from alan_wake.json (<see cref="AwSettings"/>), and the
+/// "aw_place_level" / "aw_place_world" editor commands live in the alan_wake project's Editor folder, as do the
+/// grass and foliage renderer components (its Code folder), which cell prefabs reference by name.
 /// </summary>
 public class AlanWakeMount : BaseGameMount
 {
@@ -34,93 +37,81 @@ public class AlanWakeMount : BaseGameMount
 	/// <summary>All world cells, keyed by "world/level".</summary>
 	internal readonly Dictionary<string, List<AwCellInfo>> CellsByLevel = new( StringComparer.OrdinalIgnoreCase );
 
-	[ConVar( "aw_mount_debug_log", ConVarFlags.Saved )]
+	// Settings, from alan_wake.json next to the DLL (see AwSettings): the values below are the defaults.
+
+	[AwSetting( "aw_mount_debug_log", "Log textures and terrain that fail to load, and terrain build details." )]
 	public static bool DebugLog { get; set; } = false;
 
-	/// <summary>Terrain subdivisions per terrain quad edge (1, 3, 5 or 15). 15 uses every displacement sample.</summary>
-	[ConVar( "aw_terrain_subdivisions", ConVarFlags.Saved )]
+	[AwSetting( "aw_terrain_subdivisions", "Terrain subdivisions per terrain quad edge (1, 3, 5 or 15). 15 uses every displacement sample." )]
 	public static int TerrainSubdivisions { get; set; } = 5;
 
-	/// <summary>Distance (inches) at which a cell's terrain switches to its low detail version. 0 disables.</summary>
-	[ConVar( "aw_terrain_lod_distance", ConVarFlags.Saved )]
+	[AwSetting( "aw_terrain_lod_distance", "Distance (inches) at which a cell's terrain switches to its low detail version. 0 disables." )]
 	public static float TerrainLodDistance { get; set; } = 6000;
 
-	[ConVar( "aw_terrain_brightness", ConVarFlags.Saved )]
+	[AwSetting( "aw_terrain_brightness", "Multiplier on the terrain colour." )]
 	public static float TerrainBrightness { get; set; } = 1.0f;
 
-	/// <summary>Distance (inches) at which props switch to their LOD1 mesh (when the game provides one).</summary>
-	[ConVar( "aw_mesh_lod_distance", ConVarFlags.Saved )]
+	[AwSetting( "aw_mesh_lod_distance", "Distance (inches) at which props switch to their LOD1 mesh (when the game provides one)." )]
 	public static float MeshLodDistance { get; set; } = 2500;
 
-	[ConVar( "aw_normalmaps", ConVarFlags.Saved )]
+	[AwSetting( "aw_normalmaps", "Use the game's normal maps." )]
 	public static bool NormalMaps { get; set; } = true;
 
-	[ConVar( "aw_normalmap_max_size", ConVarFlags.Saved )]
+	[AwSetting( "aw_normalmap_max_size", "Normal maps bigger than this (pixels) are scaled down." )]
 	public static int NormalMapMaxSize { get; set; } = 512;
 
-	[ConVar( "aw_normalmap_flip_green", ConVarFlags.Saved )]
+	[AwSetting( "aw_normalmap_flip_green", "Flip the green channel of the game's normal maps." )]
 	public static bool NormalMapFlipGreen { get; set; } = true;
 
-	/// <summary>Windows use s&amp;box's refractive glass (true) or its cheaper alpha blended glass (false).</summary>
-	[ConVar( "aw_glass_refraction", ConVarFlags.Saved )]
+	[AwSetting( "aw_glass_refraction", "Windows use s&box's refractive glass (true) or its cheaper alpha blended glass (false)." )]
 	public static bool GlassRefraction { get; set; } = true;
 
-	[ConVar( "aw_collision", ConVarFlags.Saved )]
+	[AwSetting( "aw_collision", "Give the terrain and static meshes collision." )]
 	public static bool Collision { get; set; } = true;
 
-	[ConVar( "aw_lights", ConVarFlags.Saved )]
+	[AwSetting( "aw_lights", "Place the game's point and spot lights." )]
 	public static bool Lights { get; set; } = true;
 
-	/// <summary>Multiplier from the game's light intensity to s&amp;box light colour brightness.</summary>
-	[ConVar( "aw_light_brightness", ConVarFlags.Saved )]
+	[AwSetting( "aw_light_brightness", "Multiplier from the game's light intensity to s&box light colour brightness." )]
 	public static float LightBrightness { get; set; } = 2.0f;
 
-	/// <summary>0 = no light shadows, 1 = spot lights only, 2 = spot lights and point lights the game marks as shadowed.</summary>
-	[ConVar( "aw_light_shadows", ConVarFlags.Saved )]
+	[AwSetting( "aw_light_shadows", "0 = no light shadows, 1 = spot lights only, 2 = spot lights and point lights the game marks as shadowed." )]
 	public static int LightShadows { get; set; } = 1;
 
-	[ConVar( "aw_dynamic_objects", ConVarFlags.Saved )]
+	[AwSetting( "aw_dynamic_objects", "Place the game's dynamic objects (doors, barrels, chairs...)." )]
 	public static bool DynamicObjects { get; set; } = true;
 
-	/// <summary>Give small loose dynamic objects (barrels, chairs, cans...) real physics. Doors, gates, poles stay put.</summary>
-	[ConVar( "aw_dynamic_physics", ConVarFlags.Saved )]
+	[AwSetting( "aw_dynamic_physics", "Give small loose dynamic objects (barrels, chairs, cans...) real physics. Doors, gates, poles stay put." )]
 	public static bool DynamicPhysics { get; set; } = true;
 
-	[ConVar( "aw_foliage", ConVarFlags.Saved )]
+	[AwSetting( "aw_foliage", "Place trees and undergrowth (needs the AwFoliageRenderer component in the game)." )]
 	public static bool Foliage { get; set; } = true;
 
-	/// <summary>Metres. Trees closer than this draw their full mesh, further ones their billboard.</summary>
-	[ConVar( "aw_foliage_mesh_distance", ConVarFlags.Saved )]
-	public static float FoliageMeshDistance { get; set; } = 120;
+	[AwSetting( "aw_foliage_mesh_distance", "Metres. Trees closer than this draw their full mesh, further ones their billboard." )]
+	public static float FoliageMeshDistance { get; set; } = 240;
 
-	/// <summary>Metres. Trees beyond this are not drawn (the game itself goes up to ~2200 m).</summary>
-	[ConVar( "aw_foliage_max_distance", ConVarFlags.Saved )]
+	[AwSetting( "aw_foliage_max_distance", "Metres. Trees beyond this are not drawn (the game itself goes up to ~2200 m)." )]
 	public static float FoliageMaxDistance { get; set; } = 2000;
 
-	/// <summary>Metres. Ferns, shrubs and grass tufts fade out at this distance (or earlier if the game says so).</summary>
-	[ConVar( "aw_foliage_undergrowth_distance", ConVarFlags.Saved )]
+	[AwSetting( "aw_foliage_undergrowth_distance", "Metres. Ferns, shrubs and grass tufts fade out at this distance (or earlier if the game says so)." )]
 	public static float UndergrowthDistance { get; set; } = 60;
 
-	/// <summary>Brightness of distant foliage billboards (impostors) relative to their atlas colour.</summary>
-	[ConVar( "aw_foliage_impostor_brightness", ConVarFlags.Saved )]
+	[AwSetting( "aw_foliage_impostor_brightness", "Brightness of distant foliage billboards (impostors) relative to their atlas colour." )]
 	public static float FoliageImpostorBrightness { get; set; } = 0.85f;
 
-	[ConVar( "aw_foliage_undergrowth_shadows", ConVarFlags.Saved )]
+	[AwSetting( "aw_foliage_undergrowth_shadows", "Let undergrowth cast shadows." )]
 	public static bool UndergrowthShadows { get; set; } = false;
 
-	[ConVar( "aw_grass", ConVarFlags.Saved )]
+	[AwSetting( "aw_grass", "Grow the game's grass (needs the AwGrassRenderer component in the game)." )]
 	public static bool Grass { get; set; } = true;
 
-	/// <summary>Metres. Grass grows around the camera up to this distance (the game uses 15 to 25).</summary>
-	[ConVar( "aw_grass_distance", ConVarFlags.Saved )]
+	[AwSetting( "aw_grass_distance", "Metres. Grass grows around the camera up to this distance (the game uses 15 to 25)." )]
 	public static float GrassDistance { get; set; } = 100;
 
-	/// <summary>Multiplier on the game's grass density.</summary>
-	[ConVar( "aw_grass_density", ConVarFlags.Saved )]
+	[AwSetting( "aw_grass_density", "Multiplier on the game's grass density." )]
 	public static float GrassDensity { get; set; } = 1;
 
-	/// <summary>Inches the grass tips sway in the wind (0 = still).</summary>
-	[ConVar( "aw_grass_wind", ConVarFlags.Saved )]
+	[AwSetting( "aw_grass_wind", "Inches the grass tips sway in the wind (0 = still)." )]
 	public static float GrassWind { get; set; } = 3;
 
 	internal const string GrassPath = "grass/grass.bingrs";
@@ -203,6 +194,8 @@ public class AlanWakeMount : BaseGameMount
 		if ( string.IsNullOrEmpty( _appDir ) )
 			return Task.CompletedTask;
 
+		AwSettings.Load( Log );
+
 		Current = this;
 		Archive = AwArchive.Open( Path.Combine( _appDir, "data" ) );
 		Log.Info( $"Alan Wake: {Archive.Count} files in archives" );
@@ -281,7 +274,12 @@ public class AlanWakeMount : BaseGameMount
 			list.Add( cell );
 
 			context.Add( ResourceType.Model, cell.TerrainResourcePath, new AwTerrainLoader( cell ) );
-			context.Add( ResourceType.PrefabFile, cell.PrefabResourcePath, new AwCellPrefabLoader( cell ) );
+
+			// The placement commands (alan_wake project, Editor/AwWorldCommands.cs) list playable cells by this tag.
+			var prefab = new AwCellPrefabLoader( cell );
+			if ( cell.HighDetailPath is not null )
+				prefab.Tags.Add( "aw_high_detail" );
+			context.Add( ResourceType.PrefabFile, cell.PrefabResourcePath, prefab );
 		}
 
 		int extras = 0;
