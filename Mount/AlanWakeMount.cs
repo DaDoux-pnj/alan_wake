@@ -68,6 +68,9 @@ public class AlanWakeMount : BaseGameMount
 	[AwSetting( "aw_normalmap_flip_green", "Flip the green channel of the game's normal maps." )]
 	public static bool NormalMapFlipGreen { get; set; } = true;
 
+	[AwSetting( "aw_specular_maps", "Vary model roughness per pixel with the game's specular maps (matte where they're dark), like the game's highlights." )]
+	public static bool SpecularMaps { get; set; } = true;
+
 	[AwSetting( "aw_glass_refraction", "Windows use s&box's refractive glass (true) or its cheaper alpha blended glass (false)." )]
 	public static bool GlassRefraction { get; set; } = true;
 

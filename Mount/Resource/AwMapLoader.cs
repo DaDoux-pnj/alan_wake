@@ -142,10 +142,10 @@ sealed class AwMapLoader( string world, List<string> levels, List<AwCellInfo> ce
 		return instance;
 	}
 
-	/// <summary>The sun and sky of the alan_wake project's scene, a clear day (the game's own lighting isn't mounted).</summary>
+	/// <summary>A clear day sun (pitch 45, yaw 15) and sky, for every map (the game's own lighting isn't mounted).</summary>
 	static void AddSunAndSky()
 	{
-		var sun = new GameObject { Name = "Sun", WorldRotation = new Rotation( -0.111490048f, 0.737198889f, -0.0996517465f, -0.658921361f ) };
+		var sun = new GameObject { Name = "Sun", WorldRotation = Rotation.From( new Angles( 45, 15, 0 ) ) };
 		var light = sun.AddComponent<DirectionalLight>();
 		light.LightColor = new Color( 0.94419f, 0.97767f, 1f );
 		light.SkyColor = new Color( 0.2532f, 0.32006f, 0.35349f );

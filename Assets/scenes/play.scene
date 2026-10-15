@@ -151,7 +151,7 @@
           "__enabled": true,
           "Flags": 0,
           "Blend": 1,
-          "Brightness": 1,
+          "Brightness": 1.1,
           "Contrast": 1,
           "HueRotate": 0,
           "OnComponentDestroy": null,
@@ -185,7 +185,7 @@
             }
           ],
           "ColorSpace": "None",
-          "ColorTempK": 5700,
+          "ColorTempK": 5200,
           "GradingMethod": "TemperatureControl",
           "GreenCurve": [
             {
@@ -274,6 +274,23 @@
               "mode": "Mirrored"
             }
           ]
+        },
+        {
+          "__type": "Sandbox.Vignette",
+          "__guid": "dd1c9940-b1ca-4602-a426-4059519dc9c5",
+          "__enabled": true,
+          "Flags": 0,
+          "Center": "0.5,0.5",
+          "Color": "0,0,0,1",
+          "Intensity": 0.05,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "Roundness": 1,
+          "Smoothness": 1
         }
       ],
       "Children": []

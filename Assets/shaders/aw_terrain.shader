@@ -76,6 +76,39 @@ PS
 	float g_flBrightness < UiGroup( "Layers,1/,0/0" ); Default1( 1.0 ); Range1( 0, 4 ); >;
 	float g_flRoughness < UiGroup( "Layers,1/,0/0" ); Default1( 0.85 ); Range1( 0, 1 ); >;
 
+	//
+	// Alan Wake lights its terrain diffusely only (sun, ambient and lights; its terrain shaders have no specular term or
+	// reflections at all), so this is s&box's standard shading with the specular half left out.
+	//
+	float4 ShadeDiffuseOnly( PixelInput i, Material m )
+	{
+		m.WorldPositionWithOffset = i.vPositionWithOffsetWs;
+		m.WorldPosition = i.vPositionWithOffsetWs + g_vHighPrecisionLightingOffsetWs.xyz;
+		m.ScreenPosition = i.vPositionSs;
+		m.GeometricNormal = i.vNormalWs.xyz;
+
+		Decals::Apply( m.WorldPosition, m );
+
+		LightingTerms_t lightTerms = InitLightingTerms();
+		CombinerInput combinerInput = ShadingModelStandard::MaterialToCombinerInput( m );
+		ComputeDirectLighting( lightTerms, combinerInput );
+		CalculateIndirectLighting( lightTerms, combinerInput );
+
+		float3 diffuseOcclusion = CalculateDiffuseAmbientOcclusion( combinerInput, lightTerms );
+		lightTerms.vIndirectDiffuse.rgb *= diffuseOcclusion;
+		lightTerms.vDiffuse.rgb *= lerp( float3( 1.0, 1.0, 1.0 ), diffuseOcclusion, combinerInput.flAmbientOcclusionDirectDiffuse );
+
+		float4 color = float4( ( lightTerms.vDiffuse.rgb + lightTerms.vIndirectDiffuse.rgb ) * combinerInput.vDiffuseColor.rgb, 1.0 );
+
+		if ( DepthNormals::WantsDepthNormals() )
+			return DepthNormals::Output( m.Normal, m.Roughness, color.a );
+
+		if ( g_bWireframeMode )
+			return g_vWireframeColor;
+
+		return DoAtmospherics( m.WorldPosition, m.ScreenPosition.xy, color );
+	}
+
 	float4 MainPs( PixelInput i ) : SV_Target0
 	{
 		float4 baseLayer = Tex2DS( g_tLayer0, g_sAniso, i.vLayerUv01.xy );
@@ -99,6 +132,6 @@ PS
 		m.Emission = float3( 0, 0, 0 );
 		m.Transmission = 0;
 
-		return ShadingModelStandard::Shade( i, m );
+		return ShadeDiffuseOnly( i, m );
 	}
 }

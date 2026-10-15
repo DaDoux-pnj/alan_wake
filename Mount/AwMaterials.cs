@@ -133,15 +133,23 @@ static class AwMaterials
 	/// Game normal maps are DXT5nm (X in alpha, Y in green). Decode them into a regular RGB normal map with
 	/// roughness in alpha, which is what the complex shader samples from g_tNormal. A few uncompressed maps (the lakes'
 	/// water) store the normal with Y up instead: the slopes in red and blue, up in green.
+	/// With a specular map (and aw_specular_maps), roughness varies per pixel the way the game's highlight does: the
+	/// game scales its highlight by specularMap * g_vSpecularMultiplier, so where that's dark the surface is matte (1)
+	/// and where it's bright it gets the material's <paramref name="roughness"/>.
 	/// </summary>
-	public static Texture Normal( AlanWakeMount host, string path, float roughness )
+	public static Texture Normal( AlanWakeMount host, string path, float roughness, string specularPath = null, float[] specularMultiplier = null )
 	{
 		path = AwArchive.NormalizePath( path );
+		if ( !AlanWakeMount.NormalMaps )
+			path = "";
+		specularPath = AlanWakeMount.SpecularMaps ? AwArchive.NormalizePath( specularPath ) : null;
+
 		byte r = (byte)Math.Clamp( roughness * 255f, 0, 255 );
-		if ( string.IsNullOrEmpty( path ) || !AlanWakeMount.NormalMaps )
+		if ( string.IsNullOrEmpty( path ) && string.IsNullOrEmpty( specularPath ) )
 			return FlatNormal( r );
 
-		var key = $"{path}|{r / 16}";
+		float multiplier = SpecularIntensity( specularMultiplier );
+		var key = $"{path}|{r / 16}|{specularPath}|{multiplier:0.00}";
 		lock ( Lock )
 		{
 			if ( NormalTextures.TryGetValue( key, out var cached ) )
@@ -151,11 +159,13 @@ static class AwMaterials
 		Texture texture = null;
 		try
 		{
-			var bytes = host.Archive.TryRead( path );
+			byte[] rgba = null;
+			int w = 1, h = 1;
+			var bytes = string.IsNullOrEmpty( path ) ? null : host.Archive.TryRead( path );
 			if ( bytes is not null )
 			{
 				var header = AwTextureFile.ReadHeader( bytes );
-				var rgba = AwTextureFile.DecodeRgba( bytes, AlanWakeMount.NormalMapMaxSize, out int w, out int h );
+				rgba = AwTextureFile.DecodeRgba( bytes, AlanWakeMount.NormalMapMaxSize, out w, out h );
 				bool swizzled = AwTextureFile.IsDxt5( header.Format );
 				bool yUp = !swizzled && IsYUpNormalMap( rgba );
 				bool flipGreen = AlanWakeMount.NormalMapFlipGreen;
@@ -181,7 +191,32 @@ static class AwMaterials
 					rgba[o + 2] = (byte)Math.Clamp( (z * 0.5f + 0.5f) * 255f, 0, 255 );
 					rgba[o + 3] = r;
 				}
+			}
 
+			var specularBytes = string.IsNullOrEmpty( specularPath ) ? null : host.Archive.TryRead( specularPath );
+			if ( specularBytes is not null )
+			{
+				var specular = AwTextureFile.DecodeRgba( specularBytes, AlanWakeMount.NormalMapMaxSize, out int sw, out int sh );
+				if ( rgba is null )
+				{
+					// No normal map: a flat one the size of the specular map, to carry its roughness.
+					w = sw;
+					h = sh;
+					rgba = new byte[w * h * 4];
+					for ( int o = 0; o < rgba.Length; o += 4 ) { rgba[o] = 128; rgba[o + 1] = 128; rgba[o + 2] = 255; }
+				}
+
+				for ( int y = 0; y < h; y++ )
+				for ( int x = 0; x < w; x++ )
+				{
+					int s = ((y * sh / h) * sw + x * sw / w) * 4;
+					float intensity = Math.Clamp( (specular[s] * 0.299f + specular[s + 1] * 0.587f + specular[s + 2] * 0.114f) / 255f * multiplier, 0f, 1f );
+					rgba[(y * w + x) * 4 + 3] = (byte)Math.Clamp( (1f + (roughness - 1f) * intensity) * 255f, 0, 255 );
+				}
+			}
+
+			if ( rgba is not null )
+			{
 				texture = Texture.Create( w, h, ImageFormat.RGBA8888 )
 					.WithData( rgba )
 					.WithMips()
@@ -191,12 +226,17 @@ static class AwMaterials
 		}
 		catch ( Exception ex )
 		{
-			if ( AlanWakeMount.DebugLog ) Log.Warning( $"[AW] normal map '{path}': {ex.Message}" );
+			if ( AlanWakeMount.DebugLog ) Log.Warning( $"[AW] normal map '{path}' / specular map '{specularPath}': {ex.Message}" );
 		}
 
 		lock ( Lock ) NormalTextures[key] = texture;
 		return texture ?? FlatNormal( r );
 	}
+
+	/// <summary>The brightness of g_vSpecularMultiplier (the game's highlight colour/intensity), 1 when absent.</summary>
+	static float SpecularIntensity( float[] multiplier )
+		=> multiplier is { Length: >= 3 } ? Math.Max( 0f, multiplier[0] * 0.299f + multiplier[1] * 0.587f + multiplier[2] * 0.114f )
+			: multiplier is { Length: >= 1 } ? Math.Max( 0f, multiplier[0] ) : 1f;
 
 	/// <summary>
 	/// True for normal maps stored with Y up (green brighter than blue on average); tangent space maps keep up in blue.
@@ -246,7 +286,12 @@ static class AwMaterials
 		bool foliage = def.Shader.StartsWith( "Foliage", StringComparison.OrdinalIgnoreCase );
 		bool cutout = def.AlphaTest || (foliage && HasAlpha( host, colorPath ));
 
-		var key = $"{def.Shader}|{def.Flags}|{def.Blend}|{def.Cull}|{colorPath}|{normalPath}|{(tint is null ? "" : string.Join( ',', tint ))}|{roughness:0.00}";
+		// Per pixel roughness from the specular map, for the game's plain materials (chrome and car paint keep theirs).
+		bool plain = def.Shader.StartsWith( "StandardMaterial", StringComparison.OrdinalIgnoreCase ) || def.Shader.StartsWith( "Character", StringComparison.OrdinalIgnoreCase );
+		var specularPath = plain ? def.Texture( "g_sSpecularMap" ) : null;
+		var specularMultiplier = def.Vector( "g_vSpecularMultiplier" );
+
+		var key = $"{def.Shader}|{def.Flags}|{def.Blend}|{def.Cull}|{colorPath}|{normalPath}|{(tint is null ? "" : string.Join( ',', tint ))}|{roughness:0.00}|{specularPath}|{(specularMultiplier is null ? "" : string.Join( ',', specularMultiplier ))}";
 		lock ( Lock )
 		{
 			if ( Materials.TryGetValue( key, out var cached ) )
@@ -258,7 +303,7 @@ static class AwMaterials
 		var color = Color( host, colorPath );
 		material.Set( "g_tColor", color ?? Texture.White );
 
-		material.Set( "g_tNormal", Normal( host, normalPath, roughness ) );
+		material.Set( "g_tNormal", Normal( host, normalPath, roughness, specularPath, specularMultiplier ) );
 		material.Set( "g_tAmbientOcclusion", Texture.White );
 		material.Set( "g_flMetalness", def.Shader.StartsWith( "Chrome", StringComparison.OrdinalIgnoreCase ) ? 0.5f : 0f );
 		material.Set( "g_flRoughnessScaleFactor", 1.0f );
