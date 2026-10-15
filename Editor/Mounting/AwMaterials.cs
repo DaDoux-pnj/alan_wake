@@ -161,6 +161,8 @@ static class AwMaterials
 		var tint = def.Vector( "g_vColorMultiplier" );
 		float gloss = def.Value( "g_fGlossiness", 0.2f );
 		bool glass = def.Shader.StartsWith( "Glass", StringComparison.OrdinalIgnoreCase );
+		bool foliage = def.Shader.StartsWith( "Foliage", StringComparison.OrdinalIgnoreCase );
+		bool cutout = def.AlphaTest || (foliage && HasAlpha( host, colorPath ));
 
 		var key = $"{def.Shader}|{def.Flags}|{def.Blend}|{def.Cull}|{colorPath}|{normalPath}|{(tint is null ? "" : string.Join( ',', tint ))}|{gloss:0.00}";
 		lock ( Lock )
@@ -185,7 +187,7 @@ static class AwMaterials
 			c = new Color( 0.75f, 0.8f, 0.85f, 0.35f );
 		material.Set( "g_vColorTint", c );
 
-		if ( def.AlphaTest )
+		if ( cutout )
 		{
 			material.SetFeature( "F_ALPHA_TEST", 1 );
 			material.Set( "g_flAlphaTestReference", 0.5f );
@@ -195,11 +197,46 @@ static class AwMaterials
 			material.SetFeature( "F_TRANSLUCENT", 1 );
 		}
 
-		if ( def.TwoSided || def.AlphaTest )
+		if ( def.TwoSided || cutout )
 			material.SetFeature( "F_RENDER_BACKFACES", 1 );
 
 		lock ( Lock ) Materials[key] = material;
 		return material;
+	}
+
+	/// <summary>Alpha-tested, two sided material showing the foliage billboard atlas (impostors).</summary>
+	public static Material ForImpostor( AlanWakeMount host, string atlasPath )
+	{
+		var key = $"impostor|{atlasPath}";
+		lock ( Lock )
+		{
+			if ( Materials.TryGetValue( key, out var cached ) )
+				return cached;
+		}
+
+		var material = Material.Create( $"alan_wake/materials/m{System.Threading.Interlocked.Increment( ref _counter )}", ObjectShader, false );
+		material.Set( "g_tColor", Color( host, atlasPath ) ?? Texture.White );
+		material.Set( "g_tNormal", FlatNormal( 230 ) );
+		material.Set( "g_tAmbientOcclusion", Texture.White );
+		material.Set( "g_flMetalness", 0f );
+		material.Set( "g_flRoughnessScaleFactor", 1.0f );
+		material.Set( "g_vColorTint", global::Color.White );
+		material.SetFeature( "F_ALPHA_TEST", 1 );
+		material.Set( "g_flAlphaTestReference", 0.5f );
+		material.SetFeature( "F_RENDER_BACKFACES", 1 );
+
+		lock ( Lock ) Materials[key] = material;
+		return material;
+	}
+
+	/// <summary>True when the game texture is stored with an alpha channel (DXT5 or 32 bit).</summary>
+	static bool HasAlpha( AlanWakeMount host, string path )
+	{
+		var header = host.Archive.ReadPrefix( path, 32 );
+		if ( header is null || header.Length < 32 )
+			return false;
+		uint format = BitConverter.ToUInt32( header, 4 );
+		return !AwTextureFile.IsDxt1( format );
 	}
 
 	public static Material ForTerrain( AlanWakeMount host, string layer0, string layer1, string layer2, Texture blendAtlas, string key )

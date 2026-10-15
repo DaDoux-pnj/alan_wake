@@ -3,9 +3,17 @@ using System.Collections.Generic;
 
 namespace Sandbox.Mounting;
 
-/// <summary>Builds an s&amp;box model from one .binmsh (LOD0 + the game's LOD1 when present).</summary>
-sealed class AwModelLoader( string archivePath ) : ResourceLoader<AlanWakeMount>
+/// <summary>
+/// Builds an s&amp;box model from one .binmsh (LOD0 + the game's LOD1 when present). Static models collide with
+/// their triangles; physics models (used for the game's dynamic objects) get a convex hull and a mass instead,
+/// since triangle meshes can't move. Physics models bigger than <see cref="LoosePropMaxSize"/> (vehicles, logs,
+/// bridge parts) keep triangle collision: the placer checks for a hull to decide whether to add a rigidbody.
+/// </summary>
+sealed class AwModelLoader( string archivePath, bool physics = false ) : ResourceLoader<AlanWakeMount>
 {
+	/// <summary>Largest LOD0 bounding box diagonal (metres) that still makes a loose physics prop.</summary>
+	public const float LoosePropMaxSize = 3f;
+
 	protected override object Load()
 	{
 		try
@@ -40,8 +48,9 @@ sealed class AwModelLoader( string archivePath ) : ResourceLoader<AlanWakeMount>
 					bounds = boundsSet ? bounds.AddBBox( subBounds ) : subBounds;
 					boundsSet = true;
 
+					// Glass still counts for physics props: a bottle's hull is the whole bottle.
 					bool solid = def is null || !(def.Translucent || def.Shader.StartsWith( "Glass", StringComparison.OrdinalIgnoreCase ) || def.Shader.StartsWith( "Water", StringComparison.OrdinalIgnoreCase ));
-					if ( solid && AlanWakeMount.Collision )
+					if ( (solid || physics) && AlanWakeMount.Collision )
 					{
 						int baseIndex = collisionPositions.Count;
 						collisionPositions.AddRange( sub.Positions );
@@ -63,8 +72,17 @@ sealed class AwModelLoader( string archivePath ) : ResourceLoader<AlanWakeMount>
 					builder.WithLodDistance( lod, 1_000_000f );
 			}
 
-			if ( collisionIndices.Count > 0 )
+			if ( physics && collisionPositions.Count >= 4 && bounds.Size.Length <= LoosePropMaxSize * AwSpace.Scale )
+			{
+				var size = bounds.Size / AwSpace.Scale;
+				float volume = MathF.Max( size.x, 0.05f ) * MathF.Max( size.y, 0.05f ) * MathF.Max( size.z, 0.05f );
+				builder.AddCollisionHull( collisionPositions );
+				builder.WithMass( Math.Clamp( volume * 150f, 1f, 400f ) );
+			}
+			else if ( collisionIndices.Count > 0 )
+			{
 				builder.AddCollisionMesh( collisionPositions, collisionIndices );
+			}
 
 			return builder.Create();
 		}

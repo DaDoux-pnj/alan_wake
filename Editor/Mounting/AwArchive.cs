@@ -138,6 +138,23 @@ sealed class AwArchive : IDisposable
 
 	public byte[] TryRead( string path ) => Exists( path ) ? Read( path ) : null;
 
+	/// <summary>Reads only the first <paramref name="count"/> bytes of a file (headers). Null if missing.</summary>
+	public byte[] ReadPrefix( string path, int count )
+	{
+		if ( !_files.TryGetValue( NormalizePath( path ), out var e ) )
+			return null;
+
+		var buffer = new byte[(int)Math.Min( count, e.Size )];
+		int read = 0;
+		while ( read < buffer.Length )
+		{
+			int n = RandomAccess.Read( _packs[e.Pack], buffer.AsSpan( read ), e.Offset + read );
+			if ( n <= 0 ) break;
+			read += n;
+		}
+		return buffer;
+	}
+
 	/// <summary>
 	/// Material/terrain files reference textures as "runtimedata\pc\data\textures\...". Map those
 	/// (and "data\..." forms) to archive paths.

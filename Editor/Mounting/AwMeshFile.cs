@@ -171,6 +171,12 @@ sealed class AwMeshFile
 						sub.Uv0[v] = new Vector2( BitConverter.ToInt16( b, o ) / 4096f, BitConverter.ToInt16( b, o + 2 ) / 4096f );
 						haveUv = true;
 					}
+					else if ( type == 4 && usage == 4 && !haveNormal )
+					{
+						// Foliage: lighting ("bent") normal packed as unsigned bytes, w = occlusion.
+						sub.Normals[v] = AwSpace.Direction( b[o] / 127.5f - 1f, b[o + 1] / 127.5f - 1f, b[o + 2] / 127.5f - 1f ).Normal;
+						haveNormal = true;
+					}
 					o += ElementSize( type );
 				}
 

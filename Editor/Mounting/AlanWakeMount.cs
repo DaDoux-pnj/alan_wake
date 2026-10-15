@@ -68,6 +68,70 @@ public class AlanWakeMount : BaseGameMount
 	[ConVar( "aw_collision", ConVarFlags.Saved )]
 	public static bool Collision { get; set; } = true;
 
+	[ConVar( "aw_lights", ConVarFlags.Saved )]
+	public static bool Lights { get; set; } = true;
+
+	/// <summary>Multiplier from the game's light intensity to s&amp;box light colour brightness.</summary>
+	[ConVar( "aw_light_brightness", ConVarFlags.Saved )]
+	public static float LightBrightness { get; set; } = 2.0f;
+
+	/// <summary>0 = no light shadows, 1 = spot lights only, 2 = spot lights and point lights the game marks as shadowed.</summary>
+	[ConVar( "aw_light_shadows", ConVarFlags.Saved )]
+	public static int LightShadows { get; set; } = 1;
+
+	[ConVar( "aw_dynamic_objects", ConVarFlags.Saved )]
+	public static bool DynamicObjects { get; set; } = true;
+
+	/// <summary>Give small loose dynamic objects (barrels, chairs, cans...) real physics. Doors, gates, poles stay put.</summary>
+	[ConVar( "aw_dynamic_physics", ConVarFlags.Saved )]
+	public static bool DynamicPhysics { get; set; } = true;
+
+	[ConVar( "aw_foliage", ConVarFlags.Saved )]
+	public static bool Foliage { get; set; } = true;
+
+	/// <summary>Metres. Trees closer than this draw their full mesh, further ones their billboard.</summary>
+	[ConVar( "aw_foliage_mesh_distance", ConVarFlags.Saved )]
+	public static float FoliageMeshDistance { get; set; } = 120;
+
+	/// <summary>Metres. Trees beyond this are not drawn (the game itself goes up to ~2200 m).</summary>
+	[ConVar( "aw_foliage_max_distance", ConVarFlags.Saved )]
+	public static float FoliageMaxDistance { get; set; } = 2000;
+
+	/// <summary>Metres. Ferns, shrubs and grass tufts fade out at this distance (or earlier if the game says so).</summary>
+	[ConVar( "aw_foliage_undergrowth_distance", ConVarFlags.Saved )]
+	public static float UndergrowthDistance { get; set; } = 60;
+
+	[ConVar( "aw_foliage_undergrowth_shadows", ConVarFlags.Saved )]
+	public static bool UndergrowthShadows { get; set; } = false;
+
+	readonly Dictionary<string, AwFoliageFile> _foliage = new( StringComparer.OrdinalIgnoreCase );
+
+	/// <summary>Parsed foliage type (cached), or null if missing/broken.</summary>
+	internal AwFoliageFile GetFoliage( string archivePath )
+	{
+		archivePath = AwArchive.NormalizePath( archivePath );
+		lock ( _foliage )
+		{
+			if ( _foliage.TryGetValue( archivePath, out var cached ) )
+				return cached;
+		}
+
+		AwFoliageFile file = null;
+		try
+		{
+			var bytes = Archive.TryRead( archivePath );
+			if ( bytes is not null )
+				file = AwFoliageFile.Parse( bytes );
+		}
+		catch ( Exception ex )
+		{
+			Log.Warning( $"[AW] foliage type '{archivePath}': {ex.Message}" );
+		}
+
+		lock ( _foliage ) _foliage[archivePath] = file;
+		return file;
+	}
+
 	string _appDir;
 
 	static readonly Regex CellRegex = new( @"^worlds/([^/]+)/levels/([^/]+)/(hd|ld)(\d+)_(\d+)\.bin$", RegexOptions.CultureInvariant );
@@ -101,6 +165,7 @@ public class AlanWakeMount : BaseGameMount
 			if ( path.EndsWith( ".binmsh", StringComparison.Ordinal ) )
 			{
 				context.Add( ResourceType.Model, path[..^".binmsh".Length], new AwModelLoader( path ) );
+				context.Add( ResourceType.Model, path[..^".binmsh".Length] + "_physics", new AwModelLoader( path, physics: true ) );
 				meshes++;
 				continue;
 			}
@@ -109,6 +174,14 @@ public class AlanWakeMount : BaseGameMount
 			{
 				context.Add( ResourceType.Texture, path[..^".tex".Length], new AwTextureLoader( path ) );
 				textures++;
+				continue;
+			}
+
+			if ( path.EndsWith( ".binfol", StringComparison.Ordinal ) )
+			{
+				var name = path[..^".binfol".Length];
+				context.Add( ResourceType.Model, name, new AwFoliageModelLoader( path, false ) );
+				context.Add( ResourceType.Model, name + "_impostor", new AwFoliageModelLoader( path, true ) );
 				continue;
 			}
 
@@ -169,16 +242,17 @@ public class AlanWakeMount : BaseGameMount
 	{
 		AwMaterials.Clear();
 		CellsByLevel.Clear();
+		lock ( _foliage ) _foliage.Clear();
 		Archive?.Dispose();
 		Archive = null;
 		if ( Current == this ) Current = null;
 	}
 
-	internal static string ModelPathForMesh( string archivePath )
+	internal static string ModelPathForMesh( string archivePath, bool physics = false )
 	{
 		if ( string.IsNullOrEmpty( archivePath ) || !archivePath.EndsWith( ".binmsh", StringComparison.OrdinalIgnoreCase ) )
 			return null;
-		return $"mount://alan_wake/{archivePath[..^".binmsh".Length]}.vmdl";
+		return $"mount://alan_wake/{archivePath[..^".binmsh".Length]}{(physics ? "_physics" : "")}.vmdl";
 	}
 }
 
