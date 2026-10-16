@@ -36,7 +36,7 @@ sealed class AwFoliageModelLoader( string archivePath, bool impostor ) : Resourc
 				continue;
 
 			var def = sub.MaterialIndex < foliage.Mesh.Materials.Count ? foliage.Mesh.Materials[sub.MaterialIndex] : null;
-			var material = def is null ? Material.Load( "materials/dev/dev_measure.vmat" ) : AwMaterials.ForFoliage( Host, def );
+			var material = def is null ? Material.Load( "materials/dev/dev_measure.vmat" ) : AwMaterials.ForFoliage( Host, def, foliage );
 			builder.AddMesh( AwModelLoader.BuildMesh( material, sub, out _ ) );
 			meshes++;
 		}
@@ -74,6 +74,8 @@ sealed class AwFoliageModelLoader( string archivePath, bool impostor ) : Resourc
 				Vector3.Left, Vector3.Left, Vector3.Left, Vector3.Left,
 				Vector3.Forward, Vector3.Forward, Vector3.Forward, Vector3.Forward,
 			},
+			// Same vertex layout as the meshes (the foliage shader reads a colour), but no wind: billboards stand still.
+			Wind = new Vector4[8],
 		};
 
 		builder.AddMesh( AwModelLoader.BuildMesh( AwMaterials.ForImpostor( Host, foliage.BillboardAtlas ), sub, out _ ) );

@@ -18,6 +18,8 @@ namespace Sandbox.Mounting;
 ///
 /// Sub-mesh N uses material N. Indices are relative to the sub-mesh's first vertex.
 /// Vertex element types: 2 = float3, 4 = ubyte4 (tangent), 5 = ubyte4 (skin), 7 = short2 (uv / 4096), 8 = short4n (normal).
+/// Foliage has two type 4 / usage 4 colours instead of a normal, D3DCOLORs stored B, G, R, A: the lighting ("bent")
+/// normal, then the wind data (R = branch spring, G = branch weight, B = leaf spring, A = leaf weight).
 /// </summary>
 sealed class AwMeshFile
 {
@@ -46,6 +48,7 @@ sealed class AwMeshFile
 		public Vector3[] Positions;   // s&box space (inches)
 		public Vector3[] Normals;     // s&box space
 		public Vector2[] Uv0;
+		public Vector4[] Wind;        // foliage only: branch spring / 255, branch weight, leaf spring / 255, leaf weight
 		public int[] Indices;         // s&box winding
 	}
 
@@ -147,6 +150,7 @@ sealed class AwMeshFile
 				Positions = new Vector3[vertexCount],
 				Normals = new Vector3[vertexCount],
 				Uv0 = new Vector2[vertexCount],
+				Wind = elements.Count( x => x.Type == 4 && x.Usage == 4 ) >= 2 ? new Vector4[vertexCount] : null,
 				Indices = new int[triangleCount * 3],
 			};
 
@@ -155,6 +159,7 @@ sealed class AwMeshFile
 				int o = vertexBase + vertexOffset + v * stride;
 				bool haveUv = false;
 				bool haveNormal = false;
+				int colors = 0;
 				foreach ( var (type, usage) in elements )
 				{
 					if ( type == 2 && usage == 0 )
@@ -171,11 +176,20 @@ sealed class AwMeshFile
 						sub.Uv0[v] = new Vector2( BitConverter.ToInt16( b, o ) / 4096f, BitConverter.ToInt16( b, o + 2 ) / 4096f );
 						haveUv = true;
 					}
-					else if ( type == 4 && usage == 4 && !haveNormal )
+					else if ( type == 4 && usage == 4 )
 					{
-						// Foliage: lighting ("bent") normal packed as unsigned bytes, w = occlusion.
-						sub.Normals[v] = AwSpace.Direction( b[o] / 127.5f - 1f, b[o + 1] / 127.5f - 1f, b[o + 2] / 127.5f - 1f ).Normal;
-						haveNormal = true;
+						if ( colors == 0 && !haveNormal )
+						{
+							// Foliage: lighting ("bent") normal, stored B, G, R.
+							sub.Normals[v] = AwSpace.Direction( b[o + 2] / 127.5f - 1f, b[o + 1] / 127.5f - 1f, b[o] / 127.5f - 1f ).Normal;
+							haveNormal = true;
+						}
+						else if ( colors == 1 && sub.Wind is not null )
+						{
+							sub.Wind[v] = new Vector4( b[o + 2], b[o + 1], b[o], b[o + 3] ) / 255f;
+						}
+
+						colors++;
 					}
 					o += ElementSize( type );
 				}

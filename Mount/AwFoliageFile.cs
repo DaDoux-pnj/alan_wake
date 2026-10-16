@@ -6,9 +6,12 @@ namespace Sandbox.Mounting;
 
 /// <summary>
 /// Foliage type (.binfol): u32 19, u32 meshSize, an embedded .binmsh (FoliagePRT materials, vertices with a
-/// packed lighting normal + wind data), then three billboard texture paths and these floats:
+/// packed lighting normal + wind data), then three billboard texture paths, 17 floats:
 ///   [0] billboard width, [1] billboard height (metres), [2..5] impostor rect in the billboard atlas (u, v, w, h),
-///   [6..7] mesh to billboard fade (metres), [8..9] visibility fade out (metres), ..., [16] crown radius.
+///   [6..7] mesh to billboard fade (metres), [8..9] visibility fade out (metres), ..., [15] trunk bend factor,
+///   [16] crown radius,
+/// then u8 "branches follow the copy's wind phase", f32 trunk pivot height (metres), f32[3] (player push, unused).
+/// Material flags of the FoliagePRT materials: 1 = large foliage wind table, 2 = leaves flutter.
 /// </summary>
 sealed class AwFoliageFile
 {
@@ -19,6 +22,9 @@ sealed class AwFoliageFile
 	public Vector4 AtlasRect;
 	public float MeshFadeEnd;
 	public float VisibleDistance;
+	public float WindTrunkBend;
+	public bool WindInstancePhase;
+	public float WindPivot;
 
 	public static AwFoliageFile Parse( byte[] b )
 	{
@@ -45,6 +51,15 @@ sealed class AwFoliageFile
 		file.AtlasRect = new Vector4( F( 2 ), F( 3 ), F( 4 ), F( 5 ) );
 		file.MeshFadeEnd = F( 7 );
 		file.VisibleDistance = F( 9 );
+		file.WindTrunkBend = F( 15 );
+
+		int q = p + 17 * 4;
+		if ( q + 5 <= b.Length )
+		{
+			file.WindInstancePhase = b[q] != 0;
+			file.WindPivot = BitConverter.ToSingle( b, q + 1 );
+		}
+
 		return file;
 	}
 }

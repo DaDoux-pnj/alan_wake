@@ -13,6 +13,17 @@ struct AwVertex
 	[VertexLayout.TexCoord( 0 )] public Vector4 TexCoord;
 }
 
+/// <summary>Tree / plant vertex for shaders/aw_foliage.shader: colour = the game's wind data (see AwMeshFile).</summary>
+[StructLayout( LayoutKind.Sequential )]
+struct AwFoliageVertex
+{
+	[VertexLayout.Position] public Vector3 Position;
+	[VertexLayout.Normal] public Vector3 Normal;
+	[VertexLayout.Tangent] public Vector4 Tangent;
+	[VertexLayout.TexCoord( 0 )] public Vector4 TexCoord;
+	[VertexLayout.Color] public Color Color;
+}
+
 /// <summary>
 /// Terrain vertex for shaders/aw_terrain.shader: TEXCOORD4 = layer0 uv (xy) + layer1 uv (zw),
 /// TEXCOORD5 = layer2 uv (xy) + blend atlas uv (zw). TEXCOORD0/1 repeat layer0/1 for the engine's own use.
@@ -485,15 +496,18 @@ static class AwMaterials
 	/// <summary>
 	/// A tree's or plant's material (.binfol meshes, the game's FoliagePRT) on shaders/aw_foliage.shader: lit diffusely
 	/// like the game's foliage, which has no specular at all; alpha tested where the texture has alpha, two sided then.
+	/// Sways in the game's wind with the tree type's trunk pivot and bend (aw_foliage_wind).
 	/// </summary>
-	public static Material ForFoliage( AlanWakeMount host, AwMeshFile.MaterialDef def )
+	public static Material ForFoliage( AlanWakeMount host, AwMeshFile.MaterialDef def, AwFoliageFile foliage )
 	{
 		var colorPath = def.Texture( "g_sColorMap" ) ?? "";
 		var normalPath = def.Texture( "g_sNormalMap" ) ?? "";
 		var tint = def.Vector( "g_vColorMultiplier" );
 		bool cutout = def.AlphaTest || (colorPath.Length > 0 && HasAlpha( host, colorPath ));
+		bool wind = AlanWakeMount.FoliageWind > 0f;
+		var windKey = wind ? $"{foliage.WindPivot}|{foliage.WindTrunkBend}|{foliage.WindInstancePhase}|{def.Flags & 3}" : "still";
 
-		var key = $"foliage|{colorPath}|{normalPath}|{(tint is null ? "" : string.Join( ',', tint ))}|{cutout}|{def.TwoSided}";
+		var key = $"foliage|{colorPath}|{normalPath}|{(tint is null ? "" : string.Join( ',', tint ))}|{cutout}|{def.TwoSided}|{windKey}";
 		lock ( Lock )
 		{
 			if ( Materials.TryGetValue( key, out var cached ) )
@@ -514,6 +528,13 @@ static class AwMaterials
 
 		if ( cutout || def.TwoSided )
 			material.SetFeature( "F_RENDER_BACKFACES", 1 );
+
+		material.Set( "g_flWindStrength", wind ? 1f : 0f );
+		material.Set( "g_flWindPivot", foliage.WindPivot * AwSpace.Scale );
+		material.Set( "g_flWindTrunkBend", foliage.WindTrunkBend );
+		material.Set( "g_flWindLargeTable", (def.Flags & 1) != 0 ? 1f : 0f );
+		material.Set( "g_flWindLeaves", (def.Flags & 2) != 0 ? 1f : 0f );
+		material.Set( "g_flWindInstancePhase", foliage.WindInstancePhase ? 1f : 0f );
 
 		lock ( Lock ) Materials[key] = material;
 		return material;

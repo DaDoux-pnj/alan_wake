@@ -3,8 +3,8 @@ A work in progress Alan Wake mount for S&box
 
 ## Layout
 - `Mount/`: the mount itself, built as a standalone mount like the ones in `sbox/mount` (s&box doesn't compile this folder).
-- `Assets/shaders/`: the mount's shaders (terrain, water, grass), installed next to the mount DLL.
-- `Code/`: the grass and foliage renderer components. Cell prefabs reference them by name, so a game needs these two files to show grass and trees.
+- `Assets/shaders/`: the mount's shaders (terrain, water, grass, foliage), installed next to the mount DLL.
+- `Code/`: the grass and foliage renderer components, and the game's tree wind (`AwFoliageWind.cs`). Cell prefabs reference the renderers by name, so a game needs these three files to show grass and trees.
 - `Editor/`: the `aw_list_levels`, `aw_place_level` and `aw_place_world` editor commands.
 
 ## Building the mount
@@ -21,7 +21,10 @@ The mount turns each playable area into a map, with all of the area's parts: `mo
 
 - **In this project:** open `scenes/play.scene` (also the startup scene), set the map on the Map object, and press Play. The game is multiplayer: the Player Spawner creates the lobby and gives everyone who joins their own player (`prefabs/aw_player.prefab`) on the map's spawn point, once the map has loaded. Players pick the map with the "Map" option of the New Game popup: the `aw_map` game setting in `Code/AwMaps.cs`, which s&box adds to the popup when the game is published (the popup's own map picker depends on switches only sbox.game's servers can turn on). In the editor, set it from the console before pressing Play, e.g. `aw_map TheSignal`.
 - **Players need the mount:** a published game can't include it, so players need Alan Wake installed and a copy of the `sbox/mount/alan_wake` folder.
-- **In other games:** any game that lets you pick a map lists them under Alan Wake. Grass and trees only show in games that include `Code/AwGrassRenderer.cs` and `Code/AwFoliageRenderer.cs`.
+- **In other games:** any game that lets you pick a map lists them under Alan Wake. Grass and trees only show in games that include `Code/AwGrassRenderer.cs`, `Code/AwFoliageRenderer.cs` and `Code/AwFoliageWind.cs`.
+
+## Trees
+Trees and plants sway in the game's own wind, ported from its renderer: rows of springs pushed by noise and gusts (`Code/AwFoliageWind.cs`). The game files give each tree type its trunk pivot and bend, and each vertex its branch spring, leaf flutter and how much they move it, so trunks lean, branches sway and leaves flutter out of step. `aw_foliage_wind` is the wind strength, set like the game's weather: 0 (still) to 1 (storm).
 
 ## Sounds
 Every sound bank of the game is a sound under `mount://alan_wake/audio/...`. Maps get the game's ambience as Sound Point components: looping emitters (rivers, hums, fluorescent lights), the game's "simulated" random ambience (birds, owls, crickets, creaks) repeating at the game's own intervals, and ambience one-shots. Since the game's scripts switch every placed sound on and off as the story goes, only sounds named as ambience are kept: no scripted events, music, dialogue, combat, or the game's 2D area loops. Daytime ambience is preferred where a map has some (`aw_sound_daytime`, daylight areas listed in `DaytimeMaps`, `Mount/Resource/AwMapLoader.cs`); night-only areas keep theirs. Settings: `aw_sounds`, `aw_sound_volume`, `aw_sound_daytime`.

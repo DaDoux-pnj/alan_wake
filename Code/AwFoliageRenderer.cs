@@ -4,8 +4,8 @@ using System.Buffers;
 /// <summary>
 /// Draws every placed copy of one Alan Wake foliage type (a tree species or plant) in a world cell with GPU
 /// instancing: copies closer than <see cref="MeshDistance"/> use the full mesh, copies up to
-/// <see cref="MaxDistance"/> use the game's billboard impostor, anything further is skipped.
-/// Added by the Alan Wake mount to its cell prefabs.
+/// <see cref="MaxDistance"/> use the game's billboard impostor, anything further is skipped. The meshes sway in the
+/// game's wind (<see cref="AwFoliageWind"/>). Added by the Alan Wake mount to its cell prefabs.
 /// </summary>
 [Title( "Alan Wake Foliage" )]
 [Category( "Alan Wake" )]
@@ -23,6 +23,9 @@ public sealed class AwFoliageRenderer : Component, Component.ExecuteInEditor
 
 	[Property] public bool CastShadows { get; set; } = true;
 
+	/// <summary>The game's weather wind the trees sway in: 0 (still) to 1 (storm). See <see cref="AwFoliageWind"/>.</summary>
+	[Property, Range( 0, 1 )] public float Wind { get; set; } = 0.5f;
+
 	/// <summary>Copies of the model, relative to this GameObject.</summary>
 	[Property] public List<Transform> Instances { get; set; } = new();
 
@@ -38,6 +41,9 @@ public sealed class AwFoliageRenderer : Component, Component.ExecuteInEditor
 	{
 		if ( _sceneObject is not null && !WorldTransform.Equals( _builtFor ) )
 			Rebuild();
+
+		if ( _sceneObject is not null )
+			AwFoliageWind.Update( Wind );
 	}
 
 	void Release()
@@ -65,7 +71,7 @@ public sealed class AwFoliageRenderer : Component, Component.ExecuteInEditor
 		}
 
 		_sceneObject = new FoliageSceneObject( Scene.SceneWorld, Model, Impostor, transforms, MeshDistance, MaxDistance );
-		_sceneObject.Bounds = bounds;
+		_sceneObject.Bounds = bounds.Grow( 100f ); // room for the branches swaying out
 		_sceneObject.Flags.IsOpaque = true;
 		_sceneObject.Flags.CastShadows = CastShadows;
 		_builtFor = world;
@@ -110,7 +116,16 @@ sealed class FoliageSceneObject : SceneCustomObject
 			}
 
 			if ( nearCount > 0 )
+			{
+				var wind = AwFoliageWind.Buffer;
+				if ( wind is not null )
+				{
+					Graphics.Attributes.Set( AwFoliageWind.TablesAttribute, wind );
+					Graphics.Attributes.Set( AwFoliageWind.EnabledAttribute, 1f );
+				}
+
 				Graphics.DrawModelInstanced( _mesh, near.AsSpan( 0, nearCount ) );
+			}
 			if ( farCount > 0 )
 				Graphics.DrawModelInstanced( _impostor, far.AsSpan( 0, farCount ) );
 		}

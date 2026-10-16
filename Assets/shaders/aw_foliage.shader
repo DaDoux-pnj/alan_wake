@@ -1,7 +1,7 @@
 //=========================================================================================================================
 // Alan Wake trees, undergrowth and their billboards: s&box's foliage shader lit the way the game lights its foliage,
-// diffusely only (its FoliagePRT shaders have no specular term, gloss or reflections). Instances come from
-// AwFoliageRenderer.
+// diffusely only (its FoliagePRT shaders have no specular term, gloss or reflections), swaying in the game's wind.
+// Instances and the wind come from AwFoliageRenderer.
 //=========================================================================================================================
 HEADER
 {
@@ -29,6 +29,9 @@ COMMON
 struct VertexInput
 {
 	#include "common/vertexinput.hlsl"
+
+	// The game's wind data per vertex: x = branch spring / 255, y = branch weight, z = leaf spring / 255, w = leaf weight.
+	float4 vColor : COLOR0 < Semantic( Color ); >;
 };
 
 struct PixelInput
@@ -40,9 +43,61 @@ VS
 {
 	#include "common/vertex.hlsl"
 
+	// The game's wind springs, simulated each frame by AwFoliageWind: [0, 32) small plants, [32, 64) large trees,
+	// [64, 80) trunks, [80, 96) leaves. xyz: sway in object axes, w: how hard the leaves on that branch flutter.
+	StructuredBuffer<float4> g_vAwWindTables < Attribute( "AwWindTables" ); >;
+	float g_flAwWind < Attribute( "AwWind" ); Default( 0.0 ); >;
+
+	// Per tree type, from the game's foliage files (set by the mount). Strength 0 (billboards) leaves it still.
+	float g_flWindStrength < Default( 0.0 ); Range( 0.0, 1.0 ); UiGroup( "Wind" ); >;
+	float g_flWindPivot < Default( 0.0 ); Range( 0.0, 1000.0 ); UiGroup( "Wind" ); >;
+	float g_flWindTrunkBend < Default( 0.0 ); Range( 0.0, 10.0 ); UiGroup( "Wind" ); >;
+	float g_flWindLargeTable < Default( 0.0 ); Range( 0.0, 1.0 ); UiGroup( "Wind" ); >;
+	float g_flWindLeaves < Default( 0.0 ); Range( 0.0, 1.0 ); UiGroup( "Wind" ); >;
+	float g_flWindInstancePhase < Default( 0.0 ); Range( 0.0, 1.0 ); UiGroup( "Wind" ); >;
+
+	//
+	// The game's FoliagePRT vertex wind: the trunk leans by its height above the pivot, each branch follows its spring
+	// (sway in metres), and the leaves flutter on top as hard as their branch is swaying.
+	//
+	float3 FoliageWindOffset( float3 vPositionOs, float4 vWind, uint nPhase )
+	{
+		const float flInchesPerMetre = 39.3701;
+
+		float3 vOffset = ( vPositionOs.z - g_flWindPivot ) * g_flWindTrunkBend * g_vAwWindTables[64u + nPhase].xyz;
+
+		uint nBranch = (uint)( vWind.x * 255.0 + 0.1 ) + ( g_flWindInstancePhase > 0.5 ? nPhase : 0u );
+		float4 vBranch = g_vAwWindTables[( g_flWindLargeTable > 0.5 ? 32u : 0u ) + min( nBranch, 31u )];
+		vOffset += vBranch.xyz * ( vWind.y * flInchesPerMetre );
+
+		if ( g_flWindLeaves > 0.5 )
+		{
+			uint nLeaf = min( (uint)( vWind.z * 255.0 + 0.1 ), 15u );
+			vOffset += g_vAwWindTables[80u + nLeaf].xyz * ( vBranch.w * vWind.w * flInchesPerMetre );
+		}
+
+		return vOffset * g_flWindStrength;
+	}
+
 	PixelInput MainVs( VertexInput i )
 	{
 		PixelInput o = ProcessVertex( i );
+
+		if ( g_flAwWind > 0.0 && g_flWindStrength > 0.0 )
+		{
+			float3x4 matObjectToWorld = GetTransformMatrix( i.nInstanceTransformID );
+			float3 vOriginWs = mul( matObjectToWorld, float4( 0, 0, 0, 1 ) );
+
+			// Each copy leans on one of the 16 trunk springs, picked from its position (the game uses its yaw).
+			int2 vCell = (int2)floor( vOriginWs.xy / 16.0 );
+			uint nPhase = ( ( (uint)vCell.x * 73856093u ) ^ ( (uint)vCell.y * 19349663u ) ) >> 7;
+			nPhase = nPhase & 15u;
+
+			float3 vPositionOs = i.vPositionOs.xyz + FoliageWindOffset( i.vPositionOs.xyz, i.vColor, nPhase );
+			o.vPositionWs = mul( matObjectToWorld, float4( vPositionOs, 1.0 ) );
+			o.vPositionPs.xyzw = Position3WsToPs( o.vPositionWs.xyz );
+		}
+
 		return FinalizeVertex( o );
 	}
 }

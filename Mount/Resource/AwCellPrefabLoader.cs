@@ -431,6 +431,7 @@ static class AwStaticPlacer
 			Set( renderer, "MeshDistance", meshDistance * AwSpace.Scale );
 			Set( renderer, "MaxDistance", maxDistance * AwSpace.Scale );
 			Set( renderer, "CastShadows", !undergrowth || AlanWakeMount.UndergrowthShadows );
+			Set( renderer, "Wind", Math.Clamp( AlanWakeMount.FoliageWind, 0f, 1f ) );
 			Set( renderer, "Instances", transforms );
 			added += transforms.Count;
 		}

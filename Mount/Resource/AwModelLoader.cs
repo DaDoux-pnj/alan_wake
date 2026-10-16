@@ -198,7 +198,9 @@ sealed class AwModelLoader( string archivePath, bool physics = false ) : Resourc
 			bitangents[a] += bit; bitangents[b] += bit; bitangents[c] += bit;
 		}
 
-		var verts = new List<AwVertex>( n );
+		// Trees and plants carry the game's wind data in the vertex colour (shaders/aw_foliage.shader).
+		var verts = sub.Wind is null ? new List<AwVertex>( n ) : null;
+		var foliageVerts = sub.Wind is null ? null : new List<AwFoliageVertex>( n );
 		var min = new Vector3( float.MaxValue );
 		var max = new Vector3( float.MinValue );
 		for ( int i = 0; i < n; i++ )
@@ -214,18 +216,37 @@ sealed class AwModelLoader( string archivePath, bool physics = false ) : Resourc
 			min = Vector3.Min( min, p );
 			max = Vector3.Max( max, p );
 
-			verts.Add( new AwVertex
+			var uv = new Vector4( sub.Uv0[i].x, sub.Uv0[i].y, 0, 0 );
+			if ( foliageVerts is not null )
 			{
-				Position = p,
-				Normal = normal,
-				Tangent = new Vector4( tangent, sign ),
-				TexCoord = new Vector4( sub.Uv0[i].x, sub.Uv0[i].y, 0, 0 ),
-			} );
+				var wind = sub.Wind[i];
+				foliageVerts.Add( new AwFoliageVertex
+				{
+					Position = p,
+					Normal = normal,
+					Tangent = new Vector4( tangent, sign ),
+					TexCoord = uv,
+					Color = new Color( wind.x, wind.y, wind.z, wind.w ),
+				} );
+			}
+			else
+			{
+				verts.Add( new AwVertex
+				{
+					Position = p,
+					Normal = normal,
+					Tangent = new Vector4( tangent, sign ),
+					TexCoord = uv,
+				} );
+			}
 		}
 
 		bounds = new BBox( min, max );
 		var mesh = new Mesh( material, MeshPrimitiveType.Triangles );
-		mesh.CreateVertexBuffer( verts.Count, verts );
+		if ( foliageVerts is not null )
+			mesh.CreateVertexBuffer( foliageVerts.Count, foliageVerts );
+		else
+			mesh.CreateVertexBuffer( verts.Count, verts );
 		mesh.CreateIndexBuffer( idx.Length, new List<int>( idx ) );
 		mesh.Bounds = bounds;
 		return mesh;

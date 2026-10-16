@@ -39,7 +39,7 @@
         "BodyRadius": 16,
         "BrakePower": 1,
         "CameraCollisionIgnore": "",
-        "CameraOffset": "128,-18,12",
+        "CameraOffset": "72,24,0",
         "ColliderObject": {
           "_type": "gameobject",
           "go": "ce192950-05e6-4c50-9c66-b64bd33d6bbb"
@@ -172,6 +172,18 @@
         "Speed": 1
       },
       {
+        "__type": "NoclipMoveMode",
+        "__guid": "e5b3fcd2-d9c7-4655-8e5d-5210b4ef7db6",
+        "__enabled": true,
+        "Flags": 0,
+        "OnComponentDestroy": null,
+        "OnComponentDisabled": null,
+        "OnComponentEnabled": null,
+        "OnComponentFixedUpdate": null,
+        "OnComponentStart": null,
+        "OnComponentUpdate": null
+      },
+      {
         "__type": "Sandbox.Dresser",
         "__guid": "91f181cf-32e8-4af4-a69f-edde64b80f58",
         "__enabled": true,
@@ -274,7 +286,7 @@
         ],
         "Children": [
           {
-            "__guid": "c56aca1a-95c7-41c6-8f6b-64d367d42f74",
+            "__guid": "a8bdf762-d851-4ae4-8e2a-df7998aaa0b0",
             "__version": 2,
             "Flags": 0,
             "Name": "Clothing - y_front_pants_white",
@@ -291,7 +303,7 @@
             "Components": [
               {
                 "__type": "Sandbox.SkinnedModelRenderer",
-                "__guid": "764ebe6a-2e00-4a62-9199-bc6705c5b41b",
+                "__guid": "9b5a4846-89f4-443e-9c56-4a5ae2a9dad9",
                 "__enabled": true,
                 "Flags": 0,
                 "AnimationGraph": null,

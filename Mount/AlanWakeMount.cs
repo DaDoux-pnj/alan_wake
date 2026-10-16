@@ -110,6 +110,9 @@ public class AlanWakeMount : BaseGameMount
 	[AwSetting( "aw_foliage_undergrowth_shadows", "Let undergrowth cast shadows." )]
 	public static bool UndergrowthShadows { get; set; } = false;
 
+	[AwSetting( "aw_foliage_wind", "Wind the trees and plants sway in, like the game's weather: 0 (still) to 1 (storm)." )]
+	public static float FoliageWind { get; set; } = 0.25f;
+
 	[AwSetting( "aw_grass", "Grow the game's grass (needs the AwGrassRenderer component in the game)." )]
 	public static bool Grass { get; set; } = true;
 
