@@ -1,5 +1,20 @@
 using System;
 
+/// <summary>Moves the foliage wind on once a frame, in scenes that have Alan Wake foliage.</summary>
+public sealed class AwFoliageWindSystem : GameObjectSystem
+{
+	public AwFoliageWindSystem( Scene scene ) : base( scene )
+	{
+		Listen( Stage.FinishUpdate, 0, Tick, "AwFoliageWind" );
+	}
+
+	void Tick()
+	{
+		if ( AwFoliageWind.Strength is float strength )
+			AwFoliageWind.Update( strength );
+	}
+}
+
 /// <summary>
 /// Alan Wake's foliage wind, ported from its renderer (the FoliageEngine and wind tables in renderer_sf_Win32.dll):
 /// rows of damped springs pushed around by noise and gusts. The vertices of a tree say which spring moves them and how
@@ -32,9 +47,13 @@ public static class AwFoliageWind
 	/// <summary>This frame's tables, or null before the first <see cref="Update"/>.</summary>
 	public static GpuBuffer<Vector4> Buffer => _buffer;
 
+	/// <summary>The weather wind of the foliage placed so far (set by AwFoliageRenderer), or null while there's none.</summary>
+	public static float? Strength { get; set; }
+
 	/// <summary>
-	/// Moves the wind on to now and uploads it. Every foliage renderer calls this each frame; only the first call of a
-	/// frame does anything. <paramref name="strength"/> is the game's weather wind, 0 (still) to 1 (storm).
+	/// Moves the wind on to now and uploads it (<see cref="AwFoliageWindSystem"/> calls this every frame of every scene;
+	/// only the first call of a frame does anything). <paramref name="strength"/> is the game's weather wind, 0 (still)
+	/// to 1 (storm).
 	/// </summary>
 	public static void Update( float strength )
 	{

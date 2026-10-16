@@ -14,6 +14,15 @@ sealed class AwModelLoader( string archivePath, bool physics = false ) : Resourc
 	/// <summary>Largest LOD0 bounding box diagonal (metres) that still makes a loose physics prop.</summary>
 	public const float LoosePropMaxSize = 3f;
 
+	/// <summary>Inches. No prop stops drawing closer than this, however small.</summary>
+	const float MinDrawDistance = 800f;
+
+	/// <summary>
+	/// The engine picks LODs by screen size (CalculateLODLevel): a switch value of 1 is about 19 inches away at 1920
+	/// pixels wide and a 90 degree field of view, proportionally further at higher resolutions.
+	/// </summary>
+	const float InchesPerLodUnit = 19.2f;
+
 	protected override object Load()
 	{
 		try
@@ -22,6 +31,7 @@ sealed class AwModelLoader( string archivePath, bool physics = false ) : Resourc
 			var builder = Model.Builder.WithName( Path );
 
 			bool hasLod1 = file.LodCount > 1;
+			bool hasDrawDistance = AlanWakeMount.PropDrawDistance > 0;
 			var collisionPositions = new List<Vector3>();
 			var collisionIndices = new List<int>();
 			var bounds = new BBox( Vector3.Zero, Vector3.Zero );
@@ -41,7 +51,7 @@ sealed class AwModelLoader( string archivePath, bool physics = false ) : Resourc
 				BBox subBounds;
 				var mesh = water ? BuildWaterMesh( material, sub, def, out subBounds ) : BuildMesh( material, sub, out subBounds );
 
-				if ( hasLod1 ) builder.AddMesh( mesh, sub.Lod );
+				if ( hasLod1 || hasDrawDistance ) builder.AddMesh( mesh, sub.Lod );
 				else builder.AddMesh( mesh );
 				meshCount++;
 
@@ -64,13 +74,23 @@ sealed class AwModelLoader( string archivePath, bool physics = false ) : Resourc
 			if ( meshCount == 0 )
 				return null;
 
-			if ( hasLod1 )
+			if ( hasLod1 || hasDrawDistance )
 			{
-				// Bigger props keep their full detail mesh for longer.
+				// Bigger props keep their full detail mesh for longer, and draw further: the game gives every object a
+				// draw distance, here the LOD after the last mesh, which is empty (aw_prop_draw_distance times the
+				// prop's size, so houses outlast chairs). Unused levels sit out of reach, or the engine's defaults
+				// (one every 50 units) would empty the model up close.
 				float size = boundsSet ? bounds.Size.Length : 0;
+				float drawDistance = hasDrawDistance
+					? MathF.Max( size * AlanWakeMount.PropDrawDistance, MinDrawDistance ) / InchesPerLodUnit
+					: 1_000_000f;
+				int empty = hasLod1 ? 2 : 1;
+
 				builder.WithLodDistance( 0, 0 );
-				builder.WithLodDistance( 1, MathF.Max( AlanWakeMount.MeshLodDistance, size * 6f ) );
-				for ( int lod = 2; lod < 8; lod++ )
+				if ( hasLod1 )
+					builder.WithLodDistance( 1, MathF.Min( MathF.Max( AlanWakeMount.MeshLodDistance, size * 6f ), drawDistance ) );
+				builder.WithLodDistance( empty, drawDistance );
+				for ( int lod = empty + 1; lod < 8; lod++ )
 					builder.WithLodDistance( lod, 1_000_000f );
 			}
 

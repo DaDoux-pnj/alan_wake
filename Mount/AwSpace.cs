@@ -1,3 +1,5 @@
+using System;
+
 namespace Sandbox.Mounting;
 
 /// <summary>
@@ -35,4 +37,12 @@ static class AwSpace
 
 	public static Vector3 CellOriginMetres( int cellX, int cellZ )
 		=> new Vector3( (cellX - CellBias) * CellSize, 0, (cellZ - CellBias) * CellSize );
+
+	/// <summary>Cell centre in s&amp;box space (height 0).</summary>
+	public static Vector3 CellCenter( int cellX, int cellZ )
+		=> Position( CellOriginMetres( cellX, cellZ ) + new Vector3( CellSize * 0.5f, 0, CellSize * 0.5f ) );
+
+	/// <summary>The cell an s&amp;box position (inches) lies in.</summary>
+	public static (int X, int Z) CellOf( Vector3 position )
+		=> ((int)MathF.Floor( position.x / Scale / CellSize ) + CellBias, (int)MathF.Floor( position.y / Scale / CellSize ) + CellBias);
 }

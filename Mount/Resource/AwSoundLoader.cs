@@ -177,10 +177,14 @@ static class AwSoundPlacer
 	/// <summary>Night wins: a sound with any night content is a night sound.</summary>
 	static string Combine( string a, string b ) => a == "night" || b == "night" ? "night" : a ?? b;
 
-	/// <summary>Places emitters (Alan Wake metres, relative to <paramref name="parent"/>) under a new child group.</summary>
+	/// <summary>
+	/// Places emitters (Alan Wake metres, relative to <paramref name="parent"/>) under a new child group, sorted into one
+	/// detail group per cell (<see cref="AwStaticPlacer.DetailGroup"/>) so they stream with the cells.
+	/// </summary>
 	public static int Place( GameObject parent, string groupName, IEnumerable<Emitter> emitters )
 	{
 		GameObject group = null;
+		var cells = new Dictionary<(int, int), GameObject>();
 		int added = 0;
 		foreach ( var e in emitters )
 		{
@@ -195,11 +199,12 @@ static class AwSoundPlacer
 				continue;
 
 			group ??= new GameObject { Name = groupName, Parent = parent };
+			var position = AwSpace.Position( e.Position );
 			var go = new GameObject
 			{
 				Name = System.IO.Path.GetFileName( (e.Name ?? e.Sound.Name ?? "sound").Replace( '\\', '/' ) ),
-				Parent = group,
-				LocalPosition = AwSpace.Position( e.Position ),
+				Parent = AwStaticPlacer.DetailGroupAt( group, cells, position ),
+				LocalPosition = position,
 			};
 
 			var point = go.AddComponent<SoundPointComponent>();

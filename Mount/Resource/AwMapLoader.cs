@@ -73,6 +73,21 @@ sealed class AwMapLoader( string world, List<string> levels, List<AwCellInfo> ce
 		AddSunAndSky();
 		AddSounds( root );
 		AddSpawn( playable, middle, offset, cellObjects );
+		AddDetailStreamer( root );
+	}
+
+	/// <summary>
+	/// Streams the cells' detail groups (props, physics props, lights, undergrowth, grass, sounds) by distance from the
+	/// camera, as the game streams its high detail cells: the AwDetailStreamer component of the alan_wake project's Code
+	/// folder (aw_detail_distance). Games without it keep everything on.
+	/// </summary>
+	static void AddDetailStreamer( GameObject root )
+	{
+		if ( AlanWakeMount.DetailDistance <= 0 || AwStaticPlacer.GameComponent( "AwDetailStreamer" ) is not { } type )
+			return;
+
+		var streamer = root.Components.Create( type );
+		AwStaticPlacer.Set( streamer, "Distance", AlanWakeMount.DetailDistance * AwSpace.Scale );
 	}
 
 	/// <summary>

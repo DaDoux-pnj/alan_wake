@@ -60,6 +60,12 @@ public class AlanWakeMount : BaseGameMount
 	[AwSetting( "aw_mesh_lod_distance", "Distance (inches) at which props switch to their LOD1 mesh (when the game provides one)." )]
 	public static float MeshLodDistance { get; set; } = 2500;
 
+	[AwSetting( "aw_prop_draw_distance", "How far props draw, in multiples of their size: with 100 a 1 m chair stops drawing at about 170 m (its bounding box diagonal times 100) and a house at a few km. 0 draws everything at any distance. Works in every game." )]
+	public static float PropDrawDistance { get; set; } = 100;
+
+	[AwSetting( "aw_detail_distance", "Metres. In games with the AwDetailStreamer component (the alan_wake game), props, physics props, lights, undergrowth, grass and ambient sounds only run within this distance of the camera, as the game streams its high detail cells; terrain, landmarks and trees stay. 0 keeps everything on." )]
+	public static float DetailDistance { get; set; } = 300;
+
 	[AwSetting( "aw_normalmaps", "Use the game's normal maps." )]
 	public static bool NormalMaps { get; set; } = true;
 

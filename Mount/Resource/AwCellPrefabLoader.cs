@@ -6,6 +6,8 @@ namespace Sandbox.Mounting;
 /// <summary>
 /// One world cell as a prefab: terrain, static meshes, dynamic objects (loose props get physics), lights and
 /// foliage. High detail data holds the playable content; low detail data holds distant landmarks/water and trees.
+/// The high detail content sits in one "detail" group (<see cref="AwStaticPlacer.DetailGroup"/>) that maps stream by
+/// distance, as the game streams its high detail cells around the player.
 /// Sounds are placed by the maps (AwMapLoader), which pick the ambience of a whole area at once.
 /// </summary>
 sealed class AwCellPrefabLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMount>
@@ -35,27 +37,26 @@ sealed class AwCellPrefabLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMoun
 					collider.Static = true;
 				}
 
+				// What the game shows from afar: landmarks/water and trees (the low detail data).
+				if ( ld is not null )
+				{
+					AwStaticPlacer.AddStaticObjects( Host, root, ld, "distant" );
+					if ( AlanWakeMount.Foliage )
+						AwStaticPlacer.AddFoliage( Host, root, ld, "trees", undergrowth: false );
+				}
+
+				// What it streams in only near the player: props, physics props, lights, undergrowth and grass.
 				if ( hd is not null )
 				{
-					AwStaticPlacer.AddStaticObjects( Host, root, hd, "statics" );
-					AwStaticPlacer.AddDynamicObjects( Host, root, hd );
-					AwStaticPlacer.AddLights( root, hd );
+					var detail = AwStaticPlacer.DetailGroup( root, "detail", cell.Center );
+					AwStaticPlacer.AddStaticObjects( Host, detail, hd, "statics" );
+					AwStaticPlacer.AddDynamicObjects( Host, detail, hd );
+					AwStaticPlacer.AddLights( detail, hd );
+					if ( AlanWakeMount.Foliage )
+						AwStaticPlacer.AddFoliage( Host, detail, hd, "undergrowth", undergrowth: true );
+					if ( AlanWakeMount.Grass && ld is not null )
+						AwStaticPlacer.AddGrass( Host, detail, ld, hd );
 				}
-
-				if ( ld is not null )
-					AwStaticPlacer.AddStaticObjects( Host, root, ld, "distant" );
-
-				if ( AlanWakeMount.Foliage )
-				{
-					// Trees live in the low detail data (so they show from afar), undergrowth in the high detail data.
-					if ( ld is not null )
-						AwStaticPlacer.AddFoliage( Host, root, ld, "trees", undergrowth: false );
-					if ( hd is not null )
-						AwStaticPlacer.AddFoliage( Host, root, hd, "undergrowth", undergrowth: true );
-				}
-
-				if ( AlanWakeMount.Grass && hd is not null && ld is not null )
-					AwStaticPlacer.AddGrass( Host, root, ld, hd );
 			}
 
 			_prefab = builder.Create();
@@ -75,7 +76,10 @@ sealed class AwCellPrefabLoader( AwCellInfo cell ) : ResourceLoader<AlanWakeMoun
 	}
 }
 
-/// <summary>Level wide content (global.bin) and interiors (*_hull_*.bin etc.) of one level.</summary>
+/// <summary>
+/// Level wide content (global.bin) and interiors (*_hull_*.bin etc.) of one level, given to the detail group of the
+/// cell each piece stands in, so it streams with the cells (the game shows none of it from afar).
+/// </summary>
 sealed class AwExtrasPrefabLoader( string level, List<string> files ) : ResourceLoader<AlanWakeMount>
 {
 	PrefabFile _prefab;
@@ -88,6 +92,7 @@ sealed class AwExtrasPrefabLoader( string level, List<string> files ) : Resource
 			using ( builder.Scope() )
 			{
 				var root = new GameObject { Name = $"{level}_extras" };
+				var cells = new Dictionary<(int, int), GameObject>();
 				foreach ( var file in files )
 				{
 					var blobs = AwStaticPlacer.ReadContainer( Host, file );
@@ -98,6 +103,13 @@ sealed class AwExtrasPrefabLoader( string level, List<string> files ) : Resource
 					AwStaticPlacer.AddStaticObjects( Host, group, blobs, "statics" );
 					AwStaticPlacer.AddDynamicObjects( Host, group, blobs );
 					AwStaticPlacer.AddLights( group, blobs );
+
+					// statics / dynamic / lights, each holding placed objects
+					foreach ( var kind in group.Children.ToArray() )
+					foreach ( var item in kind.Children.ToArray() )
+						item.SetParent( AwStaticPlacer.DetailGroupAt( root, cells, item.LocalPosition ), true );
+
+					group.DestroyImmediate();
 				}
 			}
 
@@ -120,6 +132,30 @@ sealed class AwExtrasPrefabLoader( string level, List<string> files ) : Resource
 
 static class AwStaticPlacer
 {
+	/// <summary>Tag of the groups AwDetailStreamer (the alan_wake project's Code folder) switches by distance.</summary>
+	public const string DetailTag = "aw_detail";
+
+	/// <summary>
+	/// A group of what the game streams in only near the player (its high detail data) for one cell: tagged
+	/// <see cref="DetailTag"/> and sitting on the cell's centre, so AwDetailStreamer can switch it by distance. Content
+	/// goes in the returned child, which cancels the offset, so everything keeps its position.
+	/// </summary>
+	public static GameObject DetailGroup( GameObject parent, string name, Vector3 cellCenter )
+	{
+		var group = new GameObject { Name = name, Parent = parent, LocalPosition = cellCenter };
+		group.Tags.Add( DetailTag );
+		return new GameObject { Name = "content", Parent = group, LocalPosition = -cellCenter };
+	}
+
+	/// <summary>The content of the detail group of the cell holding <paramref name="position"/> (inches, relative to <paramref name="parent"/>), made on first use.</summary>
+	public static GameObject DetailGroupAt( GameObject parent, Dictionary<(int, int), GameObject> groups, Vector3 position )
+	{
+		var cell = AwSpace.CellOf( position );
+		if ( !groups.TryGetValue( cell, out var content ) )
+			groups[cell] = content = DetailGroup( parent, $"detail_{cell.X:D3}_{cell.Z:D3}", AwSpace.CellCenter( cell.X, cell.Z ) );
+		return content;
+	}
+
 	/// <summary>
 	/// Name fragments of dynamic objects that the game hinges, hangs, animates or bolts down: kept static.
 	/// Anything bigger than <see cref="AwModelLoader.LoosePropMaxSize"/> (vehicles, logs, rocks) is static anyway.
@@ -446,7 +482,7 @@ static class AwStaticPlacer
 	/// this DLL: prefabs only keep components the game's type library knows (engine and game code, never mount DLLs).
 	/// Null, with one warning, when the game doesn't have it.
 	/// </summary>
-	static TypeDescription GameComponent( string name )
+	public static TypeDescription GameComponent( string name )
 	{
 		var type = Game.TypeLibrary?.GetType( typeof( Component ), name );
 		if ( type is null )
@@ -462,7 +498,7 @@ static class AwStaticPlacer
 	}
 
 	/// <summary>Sets a property of a component created from <see cref="GameComponent"/>, whose type isn't known here.</summary>
-	static void Set( Component component, string property, object value )
+	public static void Set( Component component, string property, object value )
 	{
 		var info = component.GetType().GetProperty( property );
 		if ( info is null || !info.CanWrite )
