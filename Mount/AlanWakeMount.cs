@@ -19,6 +19,7 @@ namespace Sandbox.Mounting;
 ///   worlds/{world}/{level}/cell_XXX_ZZZ               -> Prefab    (terrain + static meshes of the cell)
 ///   worlds/{world}/{level}/{level}_extras             -> Prefab    (level-wide statics, interiors)
 ///   maps/{area}                                       -> Scene     (a playable area with all its parts, see AwMapLoader)
+///   maps/open_world                                   -> Scene     (the whole game world, spawning in Bright Falls)
 /// Built as a standalone mount (sbox/mount/alan_wake/alan_wake.dll, see alan_wake.mount.csproj), so it has no
 /// ConVars or console commands: settings come from alan_wake.json (<see cref="AwSettings"/>), and the
 /// "aw_place_level" / "aw_place_world" editor commands live in the alan_wake project's Editor folder, as do the
@@ -391,6 +392,16 @@ public class AlanWakeMount : BaseGameMount
 
 			var levels = area.Select( x => x[0].Level ).OrderBy( x => x, StringComparer.OrdinalIgnoreCase ).ToList();
 			context.Add( ResourceType.Scene, $"maps/{AwMapLoader.MapName( area.Key.World, area.Key.Area )}", new AwMapLoader( area.Key.World, levels, areaCells ) );
+			maps++;
+		}
+
+		// And the whole game world in one map, every level and the distant scenery: thousands of cells running at once,
+		// much heavier than one area. The DLC worlds are dream versions of the same ground, so they stay separate maps.
+		var gameworld = CellsByLevel.Values.Where( x => x[0].World.Equals( "gameworld", StringComparison.OrdinalIgnoreCase ) ).ToList();
+		if ( gameworld.Count > 0 )
+		{
+			var levels = gameworld.Select( x => x[0].Level ).OrderBy( x => x, StringComparer.OrdinalIgnoreCase ).ToList();
+			context.Add( ResourceType.Scene, "maps/open_world", new AwMapLoader( "gameworld", levels, gameworld.SelectMany( x => x ).ToList(), spawnArea: "brightfalls" ) );
 			maps++;
 		}
 

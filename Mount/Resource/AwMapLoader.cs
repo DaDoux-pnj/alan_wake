@@ -9,11 +9,12 @@ namespace Sandbox.Mounting;
 /// area in parts ("brightfalls_part_1" to "_4", "cauldronlake_01" to "_09"); the map holds all of them: every cell
 /// and the parts' extras as prefab instances, moved so the playable cells sit around the origin (heights kept), the
 /// sun and sky of the alan_wake project's scene, the area's ambient sounds, and a spawn point on open ground near the
-/// middle.
+/// middle. With <paramref name="spawnArea"/> the map can hold more than one area (open_world: the whole game world)
+/// while centring on and spawning in that one.
 /// Games load it through MapInstance; grass and trees only show in games that have the grass and foliage renderer
 /// components (see <see cref="AwStaticPlacer"/>).
 /// </summary>
-sealed class AwMapLoader( string world, List<string> levels, List<AwCellInfo> cells ) : SceneLoader<AlanWakeMount>
+sealed class AwMapLoader( string world, List<string> levels, List<AwCellInfo> cells, string spawnArea = null ) : SceneLoader<AlanWakeMount>
 {
 	static readonly Regex AreaSuffix = new( @"^(.+?)(?:_part_?\d+|_?\d+)$", RegexOptions.CultureInvariant );
 
@@ -46,6 +47,10 @@ sealed class AwMapLoader( string world, List<string> levels, List<AwCellInfo> ce
 	protected override void BuildScene()
 	{
 		var playable = cells.Where( c => c.HighDetailPath is not null ).ToList();
+		var spawnCells = playable.Where( c => string.Equals( AreaOf( c.Level ), spawnArea, StringComparison.OrdinalIgnoreCase ) ).ToList();
+		if ( spawnCells.Count > 0 )
+			playable = spawnCells;
+
 		var middle = playable.Aggregate( Vector3.Zero, ( sum, c ) => sum + c.CenterMetres ) / playable.Count;
 		var offset = -AwSpace.Position( middle );
 
@@ -70,8 +75,11 @@ sealed class AwMapLoader( string world, List<string> levels, List<AwCellInfo> ce
 		AddSpawn( playable, middle, offset, cellObjects );
 	}
 
-	/// <summary>Areas the game also visits in daylight (it has day ambience tracks for them), so day sounds win there.</summary>
-	static readonly HashSet<string> DaytimeMaps = new( StringComparer.OrdinalIgnoreCase ) { "brightfalls", "level2", "level_16" };
+	/// <summary>
+	/// Areas the game also visits in daylight (it has day ambience tracks for them), so day sounds win there; the whole
+	/// world spawns in Bright Falls by day.
+	/// </summary>
+	static readonly HashSet<string> DaytimeMaps = new( StringComparer.OrdinalIgnoreCase ) { "brightfalls", "level2", "level_16", "open_world" };
 
 	/// <summary>
 	/// The ambience of the whole map: the sound emitters of its cells, its level files and the episodes (whose scripts

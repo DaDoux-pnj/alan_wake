@@ -1,6 +1,7 @@
 /// <summary>
 /// The playable areas of the Alan Wake mount (its maps/*.scene). The New Game popup lists them by name, so the
-/// names are spelled to read well there ("BrightFalls" shows as "Bright Falls"); the first one is the default.
+/// names are spelled to read well there ("BrightFalls" shows as "Bright Falls", underscores become spaces; no
+/// punctuation possible); the first one is the default.
 /// </summary>
 public enum AwMap
 {
@@ -20,6 +21,9 @@ public enum AwMap
 	SouthRim,
 	TheSignal,
 	TheWriter,
+
+	/// <summary>The whole game world at once, spawning in Bright Falls: runs much slower than the single areas.</summary>
+	OpenWorld_PerformanceHeavy,
 }
 
 public static class AwMaps
@@ -52,6 +56,7 @@ public static class AwMaps
 			AwMap.SouthRim => "sw_rim_south",
 			AwMap.TheSignal => "dlc1_brightfalls",
 			AwMap.TheWriter => "dlc2_cauldronlake",
+			AwMap.OpenWorld_PerformanceHeavy => "open_world",
 			_ => "brightfalls",
 		};
 

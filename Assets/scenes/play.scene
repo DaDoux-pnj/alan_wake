@@ -337,7 +337,7 @@
           "RenderTexture": null,
           "TargetEye": "None",
           "Viewport": "0,0,1,1",
-          "ZFar": 160000,
+          "ZFar": 80000,
           "ZNear": 10
         }
       ],
@@ -365,7 +365,7 @@
           "__enabled": true,
           "Flags": 0,
           "Color": "0.81395,0.93178,1,1",
-          "EndDistance": 100000,
+          "EndDistance": 80000,
           "FalloffExponent": 1,
           "Height": 10000,
           "OnComponentDestroy": null,
