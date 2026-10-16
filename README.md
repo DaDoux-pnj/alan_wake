@@ -11,7 +11,7 @@ A work in progress Alan Wake mount for S&box
 Close s&box (it keeps loaded mount DLLs locked), then:
 
 ```
-dotnet build Mount/alan_wake.mount.csproj
+dotnet build Mount/alan_wake.mount.csproj -p:SboxDir=<your sbox folder>
 ```
 
 This builds `alan_wake.dll` and installs it with the shaders into `sbox/mount/alan_wake`; s&box loads it on the next start. If s&box isn't in `E:/SteamLibrary/steamapps/common/sbox`, add `-p:SboxDir=<your sbox folder>`. Rebuild after s&box updates that change the engine API.
