@@ -1,4 +1,4 @@
-# alan_wake
+# Alan Wake Mount
 A work in progress Alan Wake mount for S&box
 
 ## Layout
@@ -15,6 +15,9 @@ dotnet build Mount/alan_wake.mount.csproj
 ```
 
 This builds `alan_wake.dll` and installs it with the shaders into `sbox/mount/alan_wake`; s&box loads it on the next start. If s&box isn't in `E:/SteamLibrary/steamapps/common/sbox`, add `-p:SboxDir=<your sbox folder>`. Rebuild after s&box updates that change the engine API.
+
+Don't forget to enable the mount in the S&box "Mounts" section:
+<img width="2560" height="1440" alt="image" src="https://github.com/user-attachments/assets/28138e35-5f52-4144-97bc-60f5ad3aa404" />
 
 ## Maps
 The mount turns each playable area into a map, with all of the area's parts: `mount://alan_wake/maps/brightfalls.scene` holds the four Bright Falls parts. The DLC areas are named `dlc1_brightfalls` and `dlc2_cauldronlake`. Each map gets a sun, a sky and a spawn point on open ground near the middle. Areas the player can't walk on (distant scenery only) get no map. `open_world` holds the whole game world at once, every level and the distant scenery, and spawns in Bright Falls; it loads fairly quickly but runs much slower than the single areas.
